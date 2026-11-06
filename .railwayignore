@@ -1,0 +1,25 @@
+# Never uploaded by `railway up`: secrets, databases, backups, uploads, dependencies and build output, test suites
+# and harnesses. Deploy from a folder made by server/scripts/make-release.mjs, which contains none of these anyway;
+# this file is a second barrier. Keep in step with .dockerignore.
+**/.env
+**/.env.*
+!server/.env.example
+**/node_modules
+/dist
+server/dist
+server/data
+server/backups
+**/uploads
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.db-journal
+**/*.db.json
+**/*.sqlite
+**/*.sqlite3
+**/*.pem
+**/*.key
+/.acceptance
+server/src/tests
+/tests
+/scripts

@@ -1,0 +1,24 @@
+# Never sent to an image build: secrets, databases, backups, uploads, dependencies and build output (rebuilt inside),
+# test suites and harnesses. Keep in step with .railwayignore and server/scripts/make-release.mjs.
+**/.env
+**/.env.*
+!server/.env.example
+**/node_modules
+/dist
+server/dist
+server/data
+server/backups
+**/uploads
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.db-journal
+**/*.db.json
+**/*.sqlite
+**/*.sqlite3
+**/*.pem
+**/*.key
+/.acceptance
+server/src/tests
+/tests
+/scripts

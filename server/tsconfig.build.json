@@ -1,0 +1,6 @@
+{
+  // Production build (`npm run build`): the same settings as tsconfig.json, without the test suites, their helpers and
+  // their test-only fixtures, so none of them reach dist/. `npx tsc --noEmit -p .` still type-checks the tests.
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "dist", "src/tests"]
+}

@@ -1,0 +1,46 @@
+# Never committed: secrets, databases and their backups, uploaded files, dependencies, build output, test artefacts.
+# Keep in step with .dockerignore, .railwayignore and server/scripts/make-release.mjs.
+
+# Secrets (the .env.example template is committed)
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.key
+!**/src/tests/fixtures/**/*.key
+
+# Databases, WAL files, backups and their manifests (customer data)
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.db.json
+*.sqlite
+*.sqlite3
+server/data/
+server/backups/
+**/uploads/
+
+# Dependencies and build output
+node_modules/
+dist/
+server/dist/
+*.tsbuildinfo
+
+# Test and browser-acceptance artefacts (screenshots contain test data)
+.acceptance/
+coverage/
+
+# Release archives made by make-release.mjs
+*.tar.gz
+*.tar.gz.sha256
+
+# Logs and editor/OS files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
