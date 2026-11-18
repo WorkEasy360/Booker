@@ -45,6 +45,7 @@ together behind one https origin. Hosting the web app alone does not work. See
 | Working hours, breaks, time off, closures, time zones | [docs/SCHEDULING.md](docs/SCHEDULING.md) |
 | Integrations, payments, reminders: what is and is not built | [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) |
 | Staging verification, step by step | [docs/STAGING.md](docs/STAGING.md) |
+| Sign-in with WorkEasy360 Accounts (single sign-on, back-channel logout, operator commands) | [docs/workeasy360-sso.md](docs/workeasy360-sso.md) |
 
 ---
 

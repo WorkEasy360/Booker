@@ -239,7 +239,7 @@ cd /srv/workeasy360/server
 sudo -u workeasy360 npm run org:create -- --db /var/lib/workeasy360/workeasy360.db \
   --company "<Company name>" --name "<Administrator's name>" --email <administrator's email> --country India
 # asks for the administrator's password twice (hidden); at least 8 characters with an uppercase letter and a number
-sudo -u workeasy360 npm run db:status -- --db /var/lib/workeasy360/workeasy360.db    # integrity ok, 17 migrations
+sudo -u workeasy360 npm run db:status -- --db /var/lib/workeasy360/workeasy360.db    # integrity ok, 18 migrations
 ```
 
 Give the password to the administrator by phone or in person, not by email. Then start the API:
@@ -249,7 +249,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now workeasy360
 sudo journalctl -u workeasy360 -n 60 --no-pager
 ```
 
-Expect `[migrations] 17/17 applied`, `Allowed app origins: https://book.<client-domain>`, and one `[security]`
+Expect `[migrations] 18/18 applied`, `Allowed app origins: https://book.<client-domain>`, and one `[security]`
 warning only: email is disabled (until 4.8). Any other `[security]` line names a setting to fix.
 
 ### 4.7 Checks
@@ -301,7 +301,7 @@ encrypted and access-restricted. Before each upgrade, also run the backup by han
 cd /srv/workeasy360/server
 B=$(ls -t /var/backups/workeasy360/*.db | head -1)
 sudo -u workeasy360 npm run db:restore -- --from "$B" --to /tmp/restore-drill.db
-sudo -u workeasy360 npm run db:status -- --db /tmp/restore-drill.db      # integrity ok, 17 migrations
+sudo -u workeasy360 npm run db:status -- --db /tmp/restore-drill.db      # integrity ok, 18 migrations
 sudo rm /tmp/restore-drill.db*
 ```
 
@@ -423,7 +423,7 @@ installed with `npm ci --ignore-scripts`.
 ## 8. Launch checklist
 
 1. O1–O7 provided (section 3).
-2. 4.1–4.6 done; `db:status` shows integrity ok and 17 migrations; the log shows no unexpected `[security]` line.
+2. 4.1–4.6 done; `db:status` shows integrity ok and 18 migrations; the log shows no unexpected `[security]` line.
 3. 4.7: health, `staging-check.mjs` all PASS, a restart logs a clean stop, the administrator signs in.
 4. 4.8: real email verified with your test inbox, then the recipient restriction removed.
 5. 4.9: first nightly backup present on the server **and** off-site; restore drill passed.

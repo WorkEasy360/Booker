@@ -391,6 +391,13 @@ export function Header({ sidebarCollapsed, onMobileMenuToggle, mobileMenuOpen }:
                   className="flex items-center gap-2.5 w-full px-3.5 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors">
                   <LogOut className="w-4 h-4" />{t('menu.signOut')}
                 </button>
+                {user?.workeasy360?.signedIn && (
+                  // Signs out of WorkeasyBooking, then sends the browser to WorkEasy360 to sign out there too.
+                  <button onClick={() => { setProfileOpen(false); void logout({ workeasy360: true }); }}
+                    className="flex items-center gap-2.5 w-full px-3.5 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors">
+                    <LogOut className="w-4 h-4" />Sign out of WorkEasy360 too
+                  </button>
+                )}
               </div>
             </div>
           )}

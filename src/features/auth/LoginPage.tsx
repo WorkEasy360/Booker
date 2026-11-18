@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Eye, EyeOff, AlertCircle, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { ApiError, type AuthUser } from '@/api/client';
+import { ApiError, getWorkeasy360SignIn, type AuthUser, type Workeasy360SignIn } from '@/api/client';
+import { workeasy360ErrorMessage, workeasy360StartUrl } from '@/lib/workeasy360';
 import { useLanguage } from '@/i18n/LanguageContext';
 import { canOpen, homePath } from '@/lib/permissions';
 import { PRODUCT_NAME } from '@/lib/brand';
@@ -14,7 +15,18 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const from = (location.state as { from?: string })?.from;
-  const signupSuccess = new URLSearchParams(location.search).get('registered') === '1';
+  const query = new URLSearchParams(location.search);
+  const signupSuccess = query.get('registered') === '1';
+  // A WorkEasy360 sign-in that did not complete comes back here with a fixed code (server: workeasy360/routes.ts).
+  const ssoError = workeasy360ErrorMessage(query.get('sso_error'), query.get('reason'));
+  const [w360, setW360] = useState<Workeasy360SignIn | null>(null);
+  useEffect(() => {
+    // Offered as a choice, never started automatically from this page (integration guide 6a).
+    let cancelled = false;
+    getWorkeasy360SignIn().then(c => { if (!cancelled) setW360(c); }).catch(() => { /* not offered */ });
+    return () => { cancelled = true; };
+  }, []);
+  const passwordForm = !w360?.ssoOnly;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -76,6 +88,30 @@ export default function LoginPage() {
         </div>
       )}
 
+      {ssoError && !error && (
+        <div className="mb-4 flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2.5" role="alert">
+          <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
+          {ssoError}
+        </div>
+      )}
+
+      {w360?.enabled && w360.startUrl && (
+        <div className={passwordForm ? 'mb-5' : ''}>
+          <a
+            href={workeasy360StartUrl(w360.startUrl, from)}
+            className="flex w-full items-center justify-center py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-800 hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-[#00BF62] focus:ring-offset-2"
+          >
+            Continue with WorkEasy360
+          </a>
+          {passwordForm && (
+            <p className="mt-4 flex items-center gap-3 text-xs text-gray-400" aria-hidden="true">
+              <span className="h-px flex-1 bg-gray-200" />or sign in with your email<span className="h-px flex-1 bg-gray-200" />
+            </p>
+          )}
+        </div>
+      )}
+
+      {passwordForm && (
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
           <label htmlFor="login-email" className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -140,13 +176,16 @@ export default function LoginPage() {
           {loading ? t('login.submitting') : t('login.submit')}
         </button>
       </form>
+      )}
 
+      {passwordForm && (
       <p className="mt-5 text-center text-sm text-gray-500">
         {t('login.noAccount')}{' '}
         <Link to="/signup" className="text-[#00BF62] hover:text-[#008F49] font-medium focus:outline-none focus:underline">
           {t('login.create')}
         </Link>
       </p>
+      )}
     </AuthLayout>
   );
 }
