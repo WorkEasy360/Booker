@@ -7,6 +7,10 @@ import type { Express } from 'express';
 import type Database from 'better-sqlite3';
 import { FakeWorkeasy360, type ClientKeys } from './workeasy360-fake-provider';
 
+// Like the other suites here: each test signs in for real (key generation, HTTP to the fake provider, token checks),
+// which takes longer than Jest's 5 s default on a loaded machine.
+jest.setTimeout(60_000);
+
 // Sign-in with WorkEasy360 Accounts (docs/workeasy360-sso.md), against a fake WorkEasy360 provider served over real
 // HTTP on 127.0.0.1 with keys generated at start. It checks private_key_jwt (aud = the token endpoint) and PKCE the
 // way the platform does. Two app instances (A and B) are separate module graphs, each with its own connection to the
