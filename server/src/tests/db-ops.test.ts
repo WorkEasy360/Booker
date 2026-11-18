@@ -188,7 +188,7 @@ describe('migrations', () => {
       // Once the obstacle is removed, the next start applies it and the migrations after it.
       d.exec('DROP VIEW email_outbox');
       expect(runMigrations(d).applied).toEqual(MIGRATION_IDS.slice(5));
-      expect(MIGRATION_IDS.slice(5)).toEqual(['006_email_outbox', '007_time_off_and_breaks', '008_account_tokens', '009_account_email_queue', '010_appointment_history', '011_two_factor', '012_media_files', '013_appointment_resources', '014_notification_settings', '015_payments', '016_integrations', '017_notification_platform']);
+      expect(MIGRATION_IDS.slice(5)).toEqual(['006_email_outbox', '007_time_off_and_breaks', '008_account_tokens', '009_account_email_queue', '010_appointment_history', '011_two_factor', '012_media_files', '013_appointment_resources', '014_notification_settings', '015_payments', '016_integrations', '017_notification_platform', '018_workeasy360_sso']);
     } finally { d.close(); }
   });
 

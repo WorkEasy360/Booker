@@ -697,6 +697,80 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: '018_workeasy360_sso',
+    description: 'Sign-in with WorkEasy360 Accounts: identities, organization links, sign-in flows, logout tokens, entitlement answers',
+    // Additive only: new tables, and nullable columns on user_sessions. Nothing changes for password sign-in.
+    apply(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS workeasy360_identities (
+          issuer TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          email_at_link TEXT,
+          linked_by TEXT NOT NULL,
+          linked_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          last_sign_in_at TEXT,
+          PRIMARY KEY (issuer, subject)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_w360_identities_user ON workeasy360_identities(user_id, issuer);
+
+        CREATE TABLE IF NOT EXISTS workeasy360_organizations (
+          w360_organization_id TEXT PRIMARY KEY,
+          organization_id TEXT NOT NULL UNIQUE REFERENCES organizations(id) ON DELETE CASCADE,
+          linked_by TEXT NOT NULL,
+          linked_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS workeasy360_login_flows (
+          id_hash TEXT PRIMARY KEY,
+          state TEXT NOT NULL,
+          nonce TEXT NOT NULL,
+          code_verifier TEXT NOT NULL,
+          organization_hint TEXT,
+          return_to TEXT,
+          expires_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_w360_login_flows_expiry ON workeasy360_login_flows(expires_at);
+
+        CREATE TABLE IF NOT EXISTS workeasy360_logout_tokens (
+          issuer TEXT NOT NULL,
+          jti TEXT NOT NULL,
+          received_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          acceptable_until TEXT NOT NULL,
+          PRIMARY KEY (issuer, jti)
+        );
+
+        CREATE TABLE IF NOT EXISTS workeasy360_ended_sids (
+          issuer TEXT NOT NULL,
+          sid TEXT NOT NULL,
+          ended_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          PRIMARY KEY (issuer, sid)
+        );
+
+        CREATE TABLE IF NOT EXISTS workeasy360_entitlements (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          expires_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS workeasy360_audit (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          action TEXT NOT NULL,
+          detail TEXT NOT NULL DEFAULT '{}'
+        );
+      `);
+      const columns = (db.prepare('PRAGMA table_info(user_sessions)').all() as Array<{ name: string }>).map(c => c.name);
+      for (const column of ['w360_issuer', 'w360_subject', 'w360_sid', 'w360_organization_id', 'w360_id_token']) {
+        if (!columns.includes(column)) db.exec(`ALTER TABLE user_sessions ADD COLUMN ${column} TEXT`);
+      }
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_user_sessions_w360_sid ON user_sessions(w360_issuer, w360_sid) WHERE w360_sid IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_user_sessions_w360_subject ON user_sessions(w360_issuer, w360_subject) WHERE w360_subject IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 export const MIGRATION_IDS = MIGRATIONS.map(m => m.id);

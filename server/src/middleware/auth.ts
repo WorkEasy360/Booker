@@ -3,6 +3,8 @@ import type { AuthPayload } from '../types';
 import { resolveSession, csrfTokenValid } from '../auth/session';
 import { can, type Permission } from '../auth/permissions';
 import { securityConfig } from '../config/security';
+import { workeasy360Gate } from '../workeasy360/access';
+import { workeasy360 } from '../workeasy360/runtime';
 
 export type { AuthPayload };
 
@@ -44,7 +46,15 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
 
   req.user = user;
   req.authVia = presented.via;
-  next();
+  // WorkEasy360 sign-in (off unless WORKEASY360_ISSUER is set): SSO-only, the organization a WorkEasy360 session is
+  // bound to, and the organization's entitlement (workeasy360/access.ts).
+  if (!workeasy360()) {
+    // With WorkEasy360 sign-in turned off, nothing could end a WorkEasy360 session any more: it is refused.
+    if (user.w360) { res.status(401).json({ error: 'Your session has ended. Please sign in again.', code: 'SESSION_INVALID' }); return; }
+    next();
+    return;
+  }
+  workeasy360Gate(req, res, user).then(refused => { if (!refused) next(); }, next);
 }
 
 /** Requires at least one of the permissions. Use after requireAuth. */

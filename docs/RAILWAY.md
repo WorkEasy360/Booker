@@ -16,7 +16,7 @@ outbound networking, backups, CLI `up`, `ssh`, `volume`, config as code). Check 
 
 Yes, on the **Pro plan**, as **one service with one volume**. No database change is needed: the app keeps SQLite on
 the volume. Moving to PostgreSQL would mean rewriting every query (the code uses better-sqlite3's synchronous API in
-all routes and services), the 17 migrations, the triggers that refuse overlapping bookings, and the backup tools; it
+all routes and services), the 18 migrations, the triggers that refuse overlapping bookings, and the backup tools; it
 is not justified for one client and was not done.
 
 | The application needs | Railway gives | Result |
@@ -90,7 +90,7 @@ is not justified for one client and was not done.
 8. **Deploy settings.** Service → Settings → Deploy: Healthcheck Path **`/api/health`**; Restart Policy **On
    Failure**. Leave replicas at 1 (Railway refuses more with a volume).
 9. **Deploy.** In the release folder: `railway up`. The build log shows both builds; the deploy log must show
-   `[migrations] 17/17 applied; applied now: …` (a new, empty database on the volume), `Web app: served from /app/dist`,
+   `[migrations] 18/18 applied; applied now: …` (a new, empty database on the volume), `Web app: served from /app/dist`,
    `Allowed app origins: https://<name>.up.railway.app`, and only the `[security]` warning that email is disabled. If
    it says `DB_PATH is not set` or `inside the application folder`, fix the variable: nothing was written.
 10. **The client's business.** `railway ssh` (needs an SSH key added to Railway), then inside the container:
@@ -98,7 +98,7 @@ is not justified for one client and was not done.
     cd /app/server
     npm run org:create -- --db /data/workeasy360.db --company "<Company name>" --name "<Administrator's name>" \
       --email <administrator's email> --country India
-    npm run db:status -- --db /data/workeasy360.db      # integrity ok, 17 migrations
+    npm run db:status -- --db /data/workeasy360.db      # integrity ok, 18 migrations
     exit
     ```
     The password is typed twice at a hidden prompt and never shown. Give it to the administrator by phone or in

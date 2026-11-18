@@ -16,6 +16,11 @@
     "db:restore": "tsx scripts/db-restore.ts",
     "db:status": "tsx scripts/db-status.ts",
     "org:create": "tsx scripts/create-organization.ts",
+    "w360:link-org": "tsx scripts/workeasy360.ts link-org",
+    "w360:link-user": "tsx scripts/workeasy360.ts link-user",
+    "w360:set-role": "tsx scripts/workeasy360.ts set-role",
+    "w360:move-issuer": "tsx scripts/workeasy360.ts move-issuer",
+    "w360:identities": "tsx scripts/workeasy360.ts identities",
     "email:test": "tsx scripts/email-test.ts",
     "mail:catcher": "node scripts/mail-catcher.mjs",
     "test:email": "node scripts/email-flows.mjs",
@@ -30,10 +35,12 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "helmet": "^7.1.0",
+    "jose": "6.2.12",
     "jsonwebtoken": "^9.0.2",
     "libphonenumber-js": "1.13.15",
     "nanoid": "^3.3.7",
     "nodemailer": "^10.2.0",
+    "openid-client": "6.8.8",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -47,6 +54,7 @@
     "@types/nodemailer": "^8.0.2",
     "@types/smtp-server": "^3.5.13",
     "@types/supertest": "^6.0.2",
+    "esbuild": "0.28.2",
     "jest": "^29.7.0",
     "smtp-server": "^3.21.0",
     "supertest": "^7.0.0",
@@ -77,6 +85,10 @@
           }
         }
       ]
+    },
+    "moduleNameMapper": {
+      "^openid-client$": "<rootDir>/node_modules/.cache/workeasy360-cjs/openid-client.cjs",
+      "^jose$": "<rootDir>/node_modules/.cache/workeasy360-cjs/jose.cjs"
     }
   }
 }

@@ -114,6 +114,18 @@ export interface AuthUser {
   permissions?: string[];
   /** Staff record this sign-in belongs to (staff and manager accounts created by invitation). */
   staffId?: string | null;
+  /**
+   * Present when the business is linked to WorkEasy360: whether this session was opened by a WorkEasy360 sign-in, and
+   * whether the organization may still use WorkeasyBooking (null when there is no answer to give).
+   */
+  workeasy360?: { signedIn: boolean; access: { allowed: boolean; writeAllowed: boolean; reason: string } | null };
+}
+
+/** Whether "Continue with WorkEasy360" is offered, and whether it is the only way in (WORKEASY360_SSO_ONLY). */
+export interface Workeasy360SignIn { enabled: boolean; ssoOnly: boolean; startUrl: string | null }
+
+export function getWorkeasy360SignIn() {
+  return request<Workeasy360SignIn>('GET', '/auth/workeasy360/config', undefined, { timeoutMs: SESSION_CHECK_TIMEOUT_MS });
 }
 
 export interface InvitationPreview { businessName: string; staffName: string; email: string; role: 'staff' | 'manager'; expiresAt: string }
@@ -186,9 +198,13 @@ export function getMe() {
   return request<AuthUser & { csrfToken?: string }>('GET', '/auth/me', undefined, { timeoutMs: SESSION_CHECK_TIMEOUT_MS });
 }
 
-export async function logout() {
+/**
+ * Ends this WorkeasyBooking session. With `workeasy360`, a WorkEasy360 session also gets WorkEasy360's own sign-out
+ * address (`endSessionUrl`), which the caller opens next.
+ */
+export async function logout(options: { workeasy360?: boolean } = {}) {
   try {
-    return await request<{ message: string }>('POST', '/auth/logout', {});
+    return await request<{ message: string; endSessionUrl?: string }>('POST', options.workeasy360 ? '/auth/logout?workeasy360=1' : '/auth/logout', {});
   } finally {
     csrfToken = null;
   }

@@ -21,7 +21,8 @@ interface AuthContextValue {
   signup: (data: { name: string; email: string; company: string; password: string; confirmPassword: string }) => Promise<string>;
   /** For flows that sign the user in themselves (accepting an invitation). */
   signedIn: (user: AuthUser) => void;
-  logout: () => Promise<void>;
+  /** Signs out of WorkeasyBooking; with `workeasy360`, then also of WorkEasy360 (the browser goes there to confirm). */
+  logout: (options?: { workeasy360?: boolean }) => Promise<void>;
   /** Whether the signed-in user holds a permission (display only; the server enforces it). */
   can: (permission: Permission) => boolean;
 }
@@ -84,14 +85,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signedIn = useCallback((u: AuthUser) => { setUser(u); setConnectionError(null); }, []);
 
-  const logout = useCallback(async () => {
-    await apiLogout().catch(() => { /* ignore network errors on logout */ });
+  const logout = useCallback(async (options: { workeasy360?: boolean } = {}) => {
+    const result = await apiLogout(options).catch(() => null /* ignore network errors on logout */);
     // Clear mock data from localStorage (kept here for the mock layer during
     // the transition; remove once all pages are migrated to the real API).
     try {
       ['we360_appointments', 'we360_customers', 'we360_services'].forEach(k => localStorage.removeItem(k));
     } catch { /* ignore */ }
     setUser(null);
+    // WorkEasy360's own sign-out page asks the person to confirm, then returns to the sign-in page.
+    if (result?.endSessionUrl) window.location.assign(result.endSessionUrl);
   }, []);
 
   const can = useCallback((permission: Permission) => hasPermission(user?.permissions, permission), [user]);
