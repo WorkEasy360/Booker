@@ -1,5 +1,6 @@
 import fs from 'fs';
 import { createPrivateKey } from 'crypto';
+import { isIPv4 } from 'net';
 
 // Sign-in with WorkEasy360 Accounts (docs/workeasy360-sso.md). Off until WORKEASY360_ISSUER is set.
 // The names are those of the WorkEasy360 integration kit's .env.example. Validated once at startup: a bad value stops
@@ -35,10 +36,19 @@ export interface Workeasy360Settings {
   allowInsecureRequests: boolean;
 }
 
-const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+const LOOPBACK_NAMES = new Set(['localhost', '[::1]', '::1']);
+
+/**
+ * A loopback host as the platform and its reference connector define it (Python's `ipaddress.is_loopback`): localhost,
+ * ::1 and the whole of 127.0.0.0/8, not only 127.0.0.1, so a local run can give each product its own loopback address
+ * (cookies are per host). `URL` has already normalised the host (lower case, IPv4 in dotted decimal, IPv6 in brackets).
+ */
+export function isLoopbackHost(hostname: string): boolean {
+  return LOOPBACK_NAMES.has(hostname) || (isIPv4(hostname) && hostname.startsWith('127.'));
+}
 
 function isLoopback(url: URL): boolean {
-  return LOOPBACK.has(url.hostname);
+  return isLoopbackHost(url.hostname);
 }
 
 function bool(raw: string | undefined, fallback: boolean, name: string, errors: string[]): boolean {

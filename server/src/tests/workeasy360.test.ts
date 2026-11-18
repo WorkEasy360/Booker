@@ -657,5 +657,15 @@ describe('configuration', () => {
     expect(bad({ WORKEASY360_SCOPES: 'openid profile' })).toThrow(/must include openid and email/);
     expect(bad({ WORKEASY360_PRIVATE_KEY: 'not a key' })).toThrow(/not a readable PEM/);
     expect(() => readWorkeasy360Config({ WORKEASY360_SSO_ONLY: 'true' })).toThrow(/SSO_ONLY=true needs/);
+    // Loopback is 127.0.0.0/8, localhost and ::1, as the platform defines it: a local run may give the app 127.0.0.33.
+    const alias = 'http://127.0.0.33:8333';
+    const local = readWorkeasy360Config({ ...base, WORKEASY360_REDIRECT_URI: `${alias}/api/auth/workeasy360/callback`, WORKEASY360_POST_LOGOUT_REDIRECT_URI: `${alias}/login` });
+    expect(local?.redirectUri).toBe(`${alias}/api/auth/workeasy360/callback`);
+    expect(local?.postLogoutRedirectUri).toBe(`${alias}/login`);
+    expect(readWorkeasy360Config({ ...base, WORKEASY360_POST_LOGOUT_REDIRECT_URI: 'http://[::1]:5173/login' })?.postLogoutRedirectUri).toBe('http://[::1]:5173/login');
+    for (const host of ['128.0.0.1', '10.0.0.1', '127.0.0.1.example.com']) {
+      expect(bad({ WORKEASY360_POST_LOGOUT_REDIRECT_URI: `http://${host}/login` })).toThrow(/must use https/);
+    }
+    expect(bad({ NODE_ENV: 'production', WORKEASY360_ISSUER: 'https://accounts.workeasy360.com', WORKEASY360_REDIRECT_URI: `${alias}/api/auth/workeasy360/callback` })).toThrow(/WORKEASY360_REDIRECT_URI must use https/);
   });
 });
