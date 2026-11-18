@@ -219,4 +219,6 @@ export interface AuthPayload {
   sid?: string;
   /** Staff record linked to this sign-in, for staff accounts. */
   staffId?: string | null;
+  /** Present when the session was opened by a WorkEasy360 sign-in. */
+  w360?: { issuer: string; subject: string; organizationId: string; sid?: string };
 }

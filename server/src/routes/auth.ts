@@ -5,7 +5,9 @@ import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import db from '../db/init';
 import { requireAuth, readSessionToken, type AuthRequest } from '../middleware/auth';
-import { createSession, csrfTokenFor, resolveSession, revokeSession, revokeUserSessions, listUserSessions, deriveKey } from '../auth/session';
+import { createSession, csrfTokenFor, resolveSession, revokeSession, revokeUserSessions, listUserSessions, deriveKey, sessionIdToken } from '../auth/session';
+import { workeasy360 } from '../workeasy360/runtime';
+import { accessFor } from '../workeasy360/access';
 import { permissionsFor, PERMISSIONS } from '../auth/permissions';
 import { inspectInvitation, acceptInvitation } from '../services/staff-invitations';
 import { securityConfig } from '../config/security';
@@ -23,6 +25,18 @@ import {
 } from '../services/account-tokens';
 
 const router = Router();
+
+/**
+ * With WORKEASY360_SSO_ONLY=true, WorkEasy360 is the only way in: every way of getting a password session (sign-in,
+ * second step, sign-up, password reset, accepting a staff invitation) is refused.
+ */
+function passwordSignInAllowed(_req: Request, res: Response, next: () => void): void {
+  if (workeasy360()?.settings.ssoOnly) {
+    res.status(403).json({ error: 'Sign in with WorkEasy360. Password sign-in is turned off on this server.', code: 'PASSWORD_SIGN_IN_DISABLED' });
+    return;
+  }
+  next();
+}
 
 // Hash of a random throwaway value, compared when no account matches so both cases take the same time.
 const DUMMY_HASH = '$2b$12$NDgdRTbaFmDg37W3LD0quOS0fyo3bpjQ/9uQJIhmpntyLDjGkHXmq';
@@ -85,12 +99,16 @@ interface SignInUser {
   staff_id: string | null; staff_active: number | null;
 }
 
-/** An active sign-in by email or id, with the active state of its staff record. */
+/**
+ * An active sign-in by email or id, with the active state of its staff record. Accounts linked to a WorkEasy360
+ * identity are never found here: they sign in with WorkEasy360 only, so WorkEasy360 can end their sessions.
+ */
 function signInUser(by: 'email' | 'id', value: string): SignInUser | undefined {
   return db.prepare(
     `SELECT u.id, u.organization_id, u.email, u.password_hash, u.name, u.role, u.staff_id, st.is_active AS staff_active
      FROM users u LEFT JOIN staff st ON st.id = u.staff_id AND st.organization_id = u.organization_id
-     WHERE u.${by === 'email' ? 'email' : 'id'} = ? AND u.is_active = 1`
+     WHERE u.${by === 'email' ? 'email' : 'id'} = ? AND u.is_active = 1
+       AND NOT EXISTS (SELECT 1 FROM workeasy360_identities wi WHERE wi.user_id = u.id)`
   ).get(value) as SignInUser | undefined;
 }
 
@@ -148,7 +166,7 @@ const loginLimit = rateLimit(req => {
   ];
 }, { countIf: status => status === 401 });
 
-router.post('/login', loginLimit, async (req: AuthRequest, res, next) => {
+router.post('/login', passwordSignInAllowed, loginLimit, async (req: AuthRequest, res, next) => {
   try {
     const parsed = LoginSchema.safeParse(req.body);
     if (!parsed.success) { validationError(res, parsed.error); return; }
@@ -193,7 +211,7 @@ const twoFactorLimit = rateLimit(req => [
 
 const CHALLENGE_INVALID = { error: 'This sign-in has expired. Enter your email and password again.', code: 'TWO_FACTOR_CHALLENGE_INVALID' };
 
-router.post('/login/2fa', twoFactorLimit, (req: AuthRequest, res, next) => {
+router.post('/login/2fa', passwordSignInAllowed, twoFactorLimit, (req: AuthRequest, res, next) => {
   try {
     const parsed = TwoFactorLoginSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error.errors[0]?.message ?? SECOND_FACTOR_MESSAGE }); return; }
@@ -210,13 +228,25 @@ router.post('/login/2fa', twoFactorLimit, (req: AuthRequest, res, next) => {
   }
 });
 
-router.post('/logout', (req: AuthRequest, res) => {
+router.post('/logout', async (req: AuthRequest, res) => {
   // Ends this session on the server, so a copied cookie stops working too. Always succeeds.
+  // It signs out of WorkeasyBooking only. With ?workeasy360=1 a WorkEasy360 session also gets the address of
+  // WorkEasy360's own sign-out (end_session_endpoint), which the app opens next; WorkEasy360 asks the person to confirm.
   const presented = readSessionToken(req);
   const user = presented ? resolveSession(presented.token) : null;
+  const idTokenHint = user?.sid && user.w360 ? sessionIdToken(user.sid) : undefined;
   if (user?.sid) revokeSession(user.sid);
   res.clearCookie(securityConfig().cookieName, cookieOptions());
-  res.json({ data: { message: 'Logged out' } });
+  let endSessionUrl: string | undefined;
+  const runtime = workeasy360();
+  if (req.query.workeasy360 === '1' && user?.w360 && runtime) {
+    try {
+      endSessionUrl = (await runtime.client.endSessionUrl({ idTokenHint, postLogoutRedirectUri: runtime.settings.postLogoutRedirectUri }))?.toString();
+    } catch {
+      // WorkEasy360 is unreachable: the WorkeasyBooking session has ended anyway.
+    }
+  }
+  res.json({ data: { message: 'Logged out', ...(endSessionUrl ? { endSessionUrl } : {}) } });
 });
 
 // ─── Sign-up with email verification, and password reset ─────────────────────
@@ -241,7 +271,7 @@ const accountTokenLimit = rateLimit(req => [{ rule: RULES.accountTokenIp, key: c
 /** With SIGNUP_MODE=closed nobody can create a business from the web; the operator creates accounts. */
 const SIGNUP_CLOSED = { error: 'New sign-ups are closed on this server. Ask your administrator for an account.', code: 'SIGNUP_CLOSED' };
 
-router.post('/signup', signupLimit, async (req, res, next) => {
+router.post('/signup', passwordSignInAllowed, signupLimit, async (req, res, next) => {
   try {
     if (!securityConfig().signupOpen) { res.status(403).json(SIGNUP_CLOSED); return; }
     const parsed = SignupSchema.safeParse(req.body);
@@ -264,7 +294,7 @@ router.post('/verify-email/inspect', accountTokenLimit, (req, res) => {
   res.json({ data: result.data });
 });
 
-router.post('/verify-email', accountTokenLimit, (req, res, next) => {
+router.post('/verify-email', passwordSignInAllowed, accountTokenLimit, (req, res, next) => {
   try {
     if (!securityConfig().signupOpen) { res.status(403).json(SIGNUP_CLOSED); return; }
     const result = verifySignup((req.body as { token?: unknown } | undefined)?.token);
@@ -279,7 +309,7 @@ router.post('/verify-email', accountTokenLimit, (req, res, next) => {
   }
 });
 
-router.post('/verify-email/resend', resendLimit, (req, res, next) => {
+router.post('/verify-email/resend', passwordSignInAllowed, resendLimit, (req, res, next) => {
   try {
     if (!securityConfig().signupOpen) { res.status(403).json(SIGNUP_CLOSED); return; }
     const parsed = EmailOnlySchema.safeParse(req.body);
@@ -292,7 +322,7 @@ router.post('/verify-email/resend', resendLimit, (req, res, next) => {
   }
 });
 
-router.post('/password/forgot', forgotLimit, (req, res, next) => {
+router.post('/password/forgot', passwordSignInAllowed, forgotLimit, (req, res, next) => {
   try {
     const parsed = EmailOnlySchema.safeParse(req.body);
     if (!parsed.success) { validationError(res, parsed.error); return; }
@@ -316,7 +346,7 @@ const ResetSchema = z.object({
   confirmPassword: z.string().min(1, 'Please confirm your password'),
 }).refine(d => d.password === d.confirmPassword, { message: 'Passwords do not match', path: ['confirmPassword'] });
 
-router.post('/password/reset', accountTokenLimit, async (req, res, next) => {
+router.post('/password/reset', passwordSignInAllowed, accountTokenLimit, async (req, res, next) => {
   try {
     const parsed = ResetSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -379,7 +409,7 @@ router.put('/password', requireAuth, passwordLimit, async (req: AuthRequest, res
   }
 });
 
-router.get('/me', requireAuth, (req: AuthRequest, res, next) => {
+router.get('/me', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const user = db
       .prepare('SELECT id, email, name, role, organization_id, staff_id FROM users WHERE id = ?')
@@ -388,7 +418,13 @@ router.get('/me', requireAuth, (req: AuthRequest, res, next) => {
       | undefined;
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
-    res.json({ data: { ...publicUser(user), csrfToken: req.user!.sid ? csrfTokenFor(req.user!.sid) : undefined } });
+    // How this session was opened, and (for a business linked to WorkEasy360) whether the organization may still use
+    // the product, so the app can explain a refusal and offer "Sign out of WorkEasy360 too".
+    const access = await accessFor(req.user!);
+    const w360 = req.user!.w360
+      ? { signedIn: true, access: access ? { allowed: access.allowed, writeAllowed: access.writeAllowed, reason: access.reason } : null }
+      : access ? { signedIn: false, access: { allowed: access.allowed, writeAllowed: access.writeAllowed, reason: access.reason } } : undefined;
+    res.json({ data: { ...publicUser(user), csrfToken: req.user!.sid ? csrfTokenFor(req.user!.sid) : undefined, ...(w360 ? { workeasy360: w360 } : {}) } });
   } catch (err) {
     next(err);
   }
@@ -508,7 +544,7 @@ const AcceptSchema = z.object({
   confirmPassword: z.string().min(1, 'Please confirm your password'),
 }).refine(d => d.password === d.confirmPassword, { message: 'Passwords do not match', path: ['confirmPassword'] });
 
-router.post('/invitations/accept', inviteLimit, async (req, res, next) => {
+router.post('/invitations/accept', passwordSignInAllowed, inviteLimit, async (req, res, next) => {
   try {
     const parsed = AcceptSchema.safeParse(req.body);
     if (!parsed.success) { validationError(res, parsed.error); return; }

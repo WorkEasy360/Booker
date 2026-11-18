@@ -7,8 +7,10 @@
 //    STARTTLS, a sign-up is confirmed from the emailed https link, and signing in issues hardened cookies. The local
 //    server uses the test-only certificate in src/tests/fixtures/smtp-tls, which only the spawned server trusts
 //    (NODE_EXTRA_CA_CERTS), so certificate verification stays on.
+// 5. With sign-in with WorkEasy360 Accounts configured, the compiled server loads its OIDC libraries (ES modules,
+//    through require()), refuses an http issuer in production, and never prints the private key.
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -150,6 +152,35 @@ try {
     check('device cookie is __Host- prefixed and Secure', cookies.some(c => c.startsWith('__Host-we360_device=') && /;\s*Secure/i.test(c)));
     const output = p.out.join('');
     check('the server output never contains the signing secret, the SMTP password, the emailed token, or the password', !output.includes(SECRET) && !output.includes(SMTP_PASS) && !!token && !output.includes(token) && !output.includes(owner.password));
+    p.child.kill();
+    await p.exited;
+  }
+
+  // 5. Sign-in with WorkEasy360 Accounts on (docs/workeasy360-sso.md). The issuer is not reachable from here: the
+  //    sign-in start must end on the sign-in page with a fixed error, not hang or crash.
+  {
+    const privateKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ type: 'pkcs8', format: 'pem' });
+    const keyFile = path.join(TMP, 'workeasy360-smoke.pem');
+    fs.writeFileSync(keyFile, privateKey, { mode: 0o600 });
+    const w360 = {
+      ...base, WORKEASY360_ISSUER: 'https://accounts.example.invalid', WORKEASY360_CLIENT_ID: 'smoke-client',
+      WORKEASY360_KEY_ID: 'smoke-key', WORKEASY360_PRIVATE_KEY_FILE: keyFile,
+    };
+    const refused = run({ ...w360, WORKEASY360_ISSUER: 'http://accounts.example.invalid' }, await freePort(), 'w360-http.db');
+    const code = await Promise.race([refused.exited, new Promise(r => setTimeout(() => r('still running'), 20_000))]);
+    if (code === 'still running') refused.child.kill();
+    check('production refuses a WorkEasy360 issuer that is not https', code !== 0 && code !== 'still running' && /WORKEASY360_ISSUER must use https/.test(refused.out.join('')), `exit=${code}`);
+
+    const port = await freePort();
+    const p = run(w360, port, 'w360.db');
+    check('compiled server starts with WorkEasy360 sign-in on', await waitHealthy(port), p.out.join('').slice(0, 300));
+    check('startup says WorkEasy360 sign-in is on and password sign-in is kept', /WorkEasy360 sign-in: on \(issuer https:\/\/accounts\.example\.invalid, product workeasy_booking, password sign-in kept\)/.test(p.out.join('')));
+    const config = await (await fetch(`http://127.0.0.1:${port}/api/auth/workeasy360/config`)).json().catch(() => ({}));
+    check('the sign-in page is told WorkEasy360 sign-in is offered', config?.data?.enabled === true && config.data.ssoOnly === false);
+    const start = await fetch(`http://127.0.0.1:${port}/api/auth/workeasy360/start`, { redirect: 'manual', signal: AbortSignal.timeout(30_000) }).catch(e => e);
+    const location = start instanceof Response ? start.headers.get('location') ?? '' : '';
+    check('an unreachable WorkEasy360 ends on the sign-in page with sso_error=unavailable', start instanceof Response && start.status === 303 && location === 'https://book.example.test/login?sso_error=unavailable', start instanceof Response ? `${start.status} ${location}` : String(start));
+    check('the server output never contains the WorkEasy360 private key', !p.out.join('').includes(privateKey.split(/\r?\n/)[1]));
     p.child.kill();
     await p.exited;
   }

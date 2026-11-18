@@ -14,12 +14,26 @@ export function deriveKey(purpose: string): Buffer {
   return createHmac('sha256', securityConfig().jwtSecret).update(`we360:${purpose}`).digest();
 }
 
-export function createSession(userId: string, orgId: string): IssuedSession {
+/** What a WorkEasy360 sign-in records on the session it opens (back-channel logout finds sessions by sid and sub). */
+export interface Workeasy360SessionInfo {
+  issuer: string;
+  subject: string;
+  /** The provider's sign-in id, present once a back-channel logout URI is registered. */
+  sid?: string;
+  /** The WorkEasy360 organization the ID token named. */
+  organizationId: string;
+  /** Kept only as id_token_hint for "sign out of WorkEasy360 too". */
+  idToken?: string;
+}
+
+export function createSession(userId: string, orgId: string, w360?: Workeasy360SessionInfo): IssuedSession {
   const { sessionTtlMs, jwtSecret } = securityConfig();
   const sessionId = randomBytes(18).toString('base64url');
   const expiresAt = new Date(Date.now() + sessionTtlMs).toISOString();
-  db.prepare('INSERT INTO user_sessions (id, user_id, organization_id, expires_at) VALUES (?, ?, ?, ?)')
-    .run(sessionId, userId, orgId, expiresAt);
+  db.prepare(
+    `INSERT INTO user_sessions (id, user_id, organization_id, expires_at, w360_issuer, w360_subject, w360_sid, w360_organization_id, w360_id_token)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(sessionId, userId, orgId, expiresAt, w360?.issuer ?? null, w360?.subject ?? null, w360?.sid ?? null, w360?.organizationId ?? null, w360?.idToken ?? null);
   // Housekeeping: forget sessions that ended more than 30 days ago.
   db.prepare(`DELETE FROM user_sessions WHERE user_id = ? AND expires_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-30 days')`).run(userId);
   const token = jwt.sign({ sub: userId, sid: sessionId }, jwtSecret, {
@@ -33,6 +47,7 @@ interface SessionRow {
   user_id: string; session_org: string; expires_at: string; revoked_at: string | null;
   email: string; role: string; is_active: number; user_org: string;
   staff_id: string | null; staff_active: number | null; staff_org: string | null;
+  w360_issuer: string | null; w360_subject: string | null; w360_sid: string | null; w360_organization_id: string | null;
 }
 
 /** Returns the signed-in user for a token, or null when the token, session or user is no longer valid. */
@@ -47,7 +62,8 @@ export function resolveSession(token: string): AuthPayload | null {
   const row = db.prepare(
     `SELECT s.user_id, s.organization_id AS session_org, s.expires_at, s.revoked_at,
             u.email, u.role, u.is_active, u.organization_id AS user_org, u.staff_id,
-            st.is_active AS staff_active, st.organization_id AS staff_org
+            st.is_active AS staff_active, st.organization_id AS staff_org,
+            s.w360_issuer, s.w360_subject, s.w360_sid, s.w360_organization_id
      FROM user_sessions s JOIN users u ON u.id = s.user_id
      LEFT JOIN staff st ON st.id = u.staff_id
      WHERE s.id = ?`
@@ -57,7 +73,10 @@ export function resolveSession(token: string): AuthPayload | null {
   if (!row.is_active || row.user_org !== row.session_org) return null;
   // A staff sign-in only works while its staff record is active and in the same organization.
   if (row.staff_id && (!row.staff_active || row.staff_org !== row.user_org)) return null;
-  return { sub: row.user_id, email: row.email, orgId: row.user_org, role: row.role as StaffRole, sid: claims.sid, staffId: row.staff_id };
+  const w360 = row.w360_issuer && row.w360_subject && row.w360_organization_id
+    ? { issuer: row.w360_issuer, subject: row.w360_subject, organizationId: row.w360_organization_id, sid: row.w360_sid ?? undefined }
+    : undefined;
+  return { sub: row.user_id, email: row.email, orgId: row.user_org, role: row.role as StaffRole, sid: claims.sid, staffId: row.staff_id, w360 };
 }
 
 /** Active sessions of a user, newest first (no addresses or device data are stored). */
@@ -67,6 +86,12 @@ export function listUserSessions(userId: string): Array<{ id: string; createdAt:
      WHERE user_id = ? AND revoked_at IS NULL AND expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')
      ORDER BY created_at DESC`
   ).all(userId) as Array<{ id: string; createdAt: string; expiresAt: string }>;
+}
+
+/** The ID token a WorkEasy360 session was opened with (id_token_hint for "sign out of WorkEasy360 too"). */
+export function sessionIdToken(sessionId: string): string | undefined {
+  const row = db.prepare('SELECT w360_id_token FROM user_sessions WHERE id = ?').get(sessionId) as { w360_id_token: string | null } | undefined;
+  return row?.w360_id_token ?? undefined;
 }
 
 export function revokeSession(sessionId: string): void {

@@ -15,6 +15,8 @@ import { originGuard, trustedOrigins } from './middleware/origin';
 import { createShutdown } from './shutdown';
 import { mountWebApp } from './web-app';
 import { agentConfig } from './services/ai-agent';
+import { initWorkeasy360 } from './workeasy360/runtime';
+import { workeasy360Router } from './workeasy360/routes';
 
 import authRoutes from './routes/auth';
 import aiRoutes from './routes/ai';
@@ -40,6 +42,8 @@ const security = initSecurityConfig();
 const emailConfig = initEmail();
 // GEMINI_API_KEY (+ optional GEMINI_MODEL) turns on the model-backed assistant; an invalid GEMINI_MODEL stops startup.
 const assistant = agentConfig();
+// Sign-in with WorkEasy360 Accounts: off unless WORKEASY360_ISSUER is set; an unusable configuration stops startup.
+const w360 = initWorkeasy360();
 
 const app = express();
 // Client addresses for rate limits come from the socket unless TRUST_PROXY names the proxy in front of the API.
@@ -76,6 +80,8 @@ app.get('/api/health', (_req, res) => {
 });
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
+// WorkEasy360 sign-in first: its back-channel logout receiver is a server-to-server form POST (no cookie, no Origin).
+app.use('/api/auth/workeasy360', workeasy360Router());
 app.use('/api/auth', authRoutes);
 
 // ─── Admin CRUD (all require JWT) ─────────────────────────────────────────────
@@ -128,6 +134,9 @@ if (process.env.NODE_ENV !== 'test') {
       : emailConfig.transport === 'smtp' ? ` (${smtpTlsDescription(emailConfig)})` : ''}`);
     console.log(`Email recipients: ${recipientAllowlistDescription(emailConfig.allowedRecipients)}`);
     console.log(assistant ? `Assistant: Gemini (${assistant.model})` : 'Assistant: local knowledge search (GEMINI_API_KEY is not set)');
+    console.log(w360
+      ? `WorkEasy360 sign-in: on (issuer ${w360.settings.issuer}, product ${w360.settings.productCode}${w360.settings.ssoOnly ? ', SSO-only' : ', password sign-in kept'})`
+      : 'WorkEasy360 sign-in: off (WORKEASY360_ISSUER is not set)');
     if (emailConfig.transport === 'disabled') {
       console.warn('[email] New sign-ups (email verification) and password reset need email: they answer "email is not set up" until EMAIL_TRANSPORT=smtp is configured');
     }

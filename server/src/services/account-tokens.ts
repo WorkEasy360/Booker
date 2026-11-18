@@ -196,8 +196,12 @@ function resetState(row: ResetRow, now = Date.now()): 'valid' | 'used' | 'replac
   return 'valid';
 }
 
-/** Accounts that can sign in: active, and for staff sign-ins an active staff record. */
-const SIGN_IN_CAPABLE = `u.is_active = 1 AND (u.staff_id IS NULL OR EXISTS (SELECT 1 FROM staff st WHERE st.id = u.staff_id AND st.is_active = 1))`;
+/**
+ * Accounts that can sign in with a password: active, for staff sign-ins an active staff record, and not linked to a
+ * WorkEasy360 identity (those sign in with WorkEasy360 only, so a reset link must not give them a password).
+ */
+const SIGN_IN_CAPABLE = `u.is_active = 1 AND (u.staff_id IS NULL OR EXISTS (SELECT 1 FROM staff st WHERE st.id = u.staff_id AND st.is_active = 1))
+  AND NOT EXISTS (SELECT 1 FROM workeasy360_identities wi WHERE wi.user_id = u.id)`;
 
 /** Ends every unused reset link of an account and cancels their queued emails (a newer link was requested, or the password changed). */
 export function supersedePasswordResets(userId: string): void {
