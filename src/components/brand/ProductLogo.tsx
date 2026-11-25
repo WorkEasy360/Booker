@@ -2,7 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { PRODUCT_NAME } from '@/lib/brand';
 // Right-sized copy of the official "W" mark in src/assets (logo-icon.png). The full logo artwork is not used for the
-// product: its wordmark spells the company name, and the product is named WorkeasyBooking.
+// product: its wordmark spells the company name, and the product is named WorkEasy360 Booking.
 import markImage from '@/assets/brand/workeasy360-mark.png';
 
 /** The name is shown as "Workeasy" in the text colour and "Booking" in brand green. */
@@ -38,8 +38,8 @@ interface ProductLogoProps {
 }
 
 /**
- * WorkeasyBooking: the official "W" mark followed by the product name.
- * The lockup has a single accessible name, "WorkeasyBooking".
+ * WorkEasy360 Booking: the official "W" mark followed by the product name.
+ * The lockup has a single accessible name, "WorkEasy360 Booking".
  */
 export function ProductLogo({ tone = 'light', layout = 'inline', size = 'md', decorative = false, className }: ProductLogoProps) {
   const s = layout === 'stacked' ? STACKED[size] : INLINE[size];

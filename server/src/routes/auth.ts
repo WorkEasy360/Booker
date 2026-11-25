@@ -1,16 +1,18 @@
-import { Router, Response, Request } from 'express';
+import express, { Router, Response, Request } from 'express';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import db from '../db/init';
+import { removeImage, saveImage, userPhotoUrl } from '../services/media/media';
+import { MAX_UPLOAD_BYTES } from '../services/media/image-check';
 import { requireAuth, readSessionToken, type AuthRequest } from '../middleware/auth';
 import { createSession, csrfTokenFor, resolveSession, revokeSession, revokeUserSessions, listUserSessions, deriveKey } from '../auth/session';
 import { permissionsFor, PERMISSIONS } from '../auth/permissions';
 import { inspectInvitation, acceptInvitation } from '../services/staff-invitations';
 import { securityConfig } from '../config/security';
 import { BCRYPT_COST, PasswordRule } from '../auth/password-rules';
-import { RULES, clearLimit, clientKey, rateLimit } from '../middleware/rate-limit';
+import { RULES, clearLimit, clientKey, consume, rateLimit, sendRateLimited } from '../middleware/rate-limit';
 import { newBusinessLocale } from '../services/business-locale';
 import { accountEmailAvailable } from '../services/email/notify';
 import {
@@ -32,8 +34,12 @@ function cookieOptions() {
   return { httpOnly: true, secure: cfg.cookieSecure, sameSite: 'lax' as const, path: '/' };
 }
 
-function setSessionCookie(res: Response, token: string): void {
-  res.cookie(securityConfig().cookieName, token, { ...cookieOptions(), maxAge: securityConfig().sessionTtlMs });
+/**
+ * remember=false ("Remember me" unticked): a browser-session cookie without maxAge, gone when the browser closes.
+ * The server-side session keeps its normal lifetime either way.
+ */
+function setSessionCookie(res: Response, token: string, remember = true): void {
+  res.cookie(securityConfig().cookieName, token, remember ? { ...cookieOptions(), maxAge: securityConfig().sessionTtlMs } : cookieOptions());
 }
 
 // ─── Known devices ───────────────────────────────────────────────────────────
@@ -77,6 +83,7 @@ function publicUser(u: { id: string; email: string; name: string; role: string; 
   return {
     id: u.id, email: u.email, name: u.name, role: u.role, organization_id: u.organization_id,
     staffId: u.staff_id ?? null, permissions: permissionsFor(u.role),
+    photoUrl: u.organization_id ? userPhotoUrl(u.organization_id, u.id, u.staff_id) : null,
   };
 }
 
@@ -95,11 +102,11 @@ function signInUser(by: 'email' | 'id', value: string): SignInUser | undefined {
 }
 
 /** Creates the session once every required step has passed. */
-function completeSignIn(req: AuthRequest, res: Response, user: SignInUser): void {
+function completeSignIn(req: AuthRequest, res: Response, user: SignInUser, remember = true): void {
   clearLimit(RULES.loginAccountIp, `${user.email}|${clientKey(req)}`);
   clearLimit(RULES.loginAccount, user.email);
   const session = createSession(user.id, user.organization_id);
-  setSessionCookie(res, session.token);
+  setSessionCookie(res, session.token, remember);
   setDeviceCookie(res, user.id);
   res.json({ data: { user: publicUser(user), csrfToken: session.csrfToken } });
 }
@@ -114,6 +121,8 @@ function validationError(res: Response, error: z.ZodError): void {
 const LoginSchema = z.object({
   email: z.string().trim().max(254).email(),
   password: z.string().min(1).max(200),
+  /** "Remember me"; false keeps the sign-in only until the browser closes. */
+  remember: z.boolean().optional(),
 });
 
 
@@ -167,7 +176,7 @@ router.post('/login', loginLimit, async (req: AuthRequest, res, next) => {
       res.json({ data: { twoFactorRequired: true, ...issueChallenge(user.id) } });
       return;
     }
-    completeSignIn(req, res, user);
+    completeSignIn(req, res, user, parsed.data.remember !== false);
   } catch (err) {
     next(err);
   }
@@ -182,7 +191,7 @@ const SecondFactorFields = {
 const oneSecondFactor = (d: { code?: string; recoveryCode?: string }) => (d.code === undefined) !== (d.recoveryCode === undefined);
 const SECOND_FACTOR_MESSAGE = 'Enter the 6-digit code from your authenticator app, or one of your recovery codes';
 
-const TwoFactorLoginSchema = z.object({ challenge: z.string().min(1).max(400), ...SecondFactorFields })
+const TwoFactorLoginSchema = z.object({ challenge: z.string().min(1).max(400), remember: z.boolean().optional(), ...SecondFactorFields })
   .refine(oneSecondFactor, { message: SECOND_FACTOR_MESSAGE });
 
 // Only wrong codes and dead challenges count (401), per network and per account.
@@ -204,7 +213,7 @@ router.post('/login/2fa', twoFactorLimit, (req: AuthRequest, res, next) => {
       res.status(401).json({ error: 'That code is not correct, or it has already been used.', code: 'TWO_FACTOR_INVALID' });
       return;
     }
-    completeSignIn(req, res, user);
+    completeSignIn(req, res, user, parsed.data.remember !== false);
   } catch (err) {
     next(err);
   }
@@ -394,9 +403,30 @@ router.get('/me', requireAuth, (req: AuthRequest, res, next) => {
   }
 });
 
+// ─── Profile photo (My Account) ────────────────────────────────────────────────
+// Sent as the request body itself (PNG, JPEG or WebP, checked from its bytes). Replaces the previous photo.
+
+router.put('/photo', requireAuth, express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES + 1024 }), async (req: AuthRequest, res, next) => {
+  try {
+    const limit = consume([{ rule: RULES.uploadOrg, key: req.user!.orgId }]);
+    if (!limit.allowed) { sendRateLimited(res, limit.retryAfterMs); return; }
+    const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const result = await saveImage(req.user!.orgId, 'user_photo', req.user!.sub, bytes, req.user!.sub);
+    if (!result.ok) { res.status(result.status).json({ error: result.error, code: result.code }); return; }
+    res.json({ data: result.media });
+  } catch (err) { next(err); }
+});
+
+router.delete('/photo', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    if (!(await removeImage(req.user!.orgId, 'user_photo', req.user!.sub))) { res.status(404).json({ error: 'You have no profile photo' }); return; }
+    res.json({ data: { removed: true } });
+  } catch (err) { next(err); }
+});
+
 // ─── Roles (read-only description of the enforced model) ─────────────────────
 
-const ROLE_LABELS: Record<string, string> = { admin: 'Administrator', manager: 'Manager', staff: 'Staff' };
+const ROLE_LABELS: Record<string, string> = { admin: 'Owner', manager: 'Manager', staff: 'Staff' };
 
 router.get('/roles', requireAuth, (_req, res) => {
   res.json({

@@ -46,16 +46,15 @@ beforeAll(() => {
     content: `# Appointments Guide
 Creating a new appointment:
 1. Go to Appointments at /appointments/new
-2. Select a Service from the dropdown
-3. Select a Staff Member
+2. Find or add the Customer
+3. Select a Service and, when more than one person offers it, the Staff member
 4. Pick a date (cannot be in the past)
-5. Select a time slot
-6. Select or add a Customer
-7. Click Create Appointment
+5. Click one of the Available times
+6. Click Save Appointment
 
-Business rules: Date must not be in the past. Appointments cannot be double-booked for the same staff member at the same time.
+Business rules: Date must not be in the past. A staff member cannot be double-booked at the same time.
 
-Errors: "This time slot is no longer available" means another appointment exists at that time for the same staff.`,
+Errors: "That time slot is no longer available" means another appointment was booked at that time for the same staff.`,
   });
 
   indexDocument({
@@ -64,19 +63,16 @@ Errors: "This time slot is no longer available" means another appointment exists
     category: 'services',
     source: 'test/services',
     content: `# Services Guide
-A service is a bookable offering your business provides to customers.
+A service is what customers can book. It has a name and a duration; there are no prices.
 
-Creating a new service:
-1. Go to Services at /services/new
-2. Enter the service name (required)
-3. Set the duration (15 to 480 minutes)
-4. Set the price (0 or more)
-5. Choose a category: Consultation, Treatment, Class, Meeting, Other
-6. Assign staff members
-7. Click Create Service
+Adding a new service:
+1. Go to Settings → Services at /settings/services
+2. Click Add Service
+3. Enter the service name (required)
+4. Enter the duration in minutes (5 to 1440)
+5. Click Save
 
-Service categories: consultation, treatment, class, meeting, other.
-Price: enter the price per session. Set to 0 for free services.`,
+Every active team member offers a new service. Assigned services are changed in Settings → Team.`,
   });
 
   indexDocument({
@@ -85,18 +81,17 @@ Price: enter the price per session. Set to 0 for free services.`,
     category: 'staff',
     source: 'test/staff',
     content: `# Staff Guide
-A staff member is a team member who provides services.
+A staff member is a team member who takes appointments.
 
 Adding a new staff member:
-1. Go to Staff at /staff/new
-2. Enter their Full Name (required)
-3. Enter their Email (required)
-4. Set working hours
-5. Assign to workspaces and services
-6. Click Create Staff
+1. Go to Settings → Team at /settings/team
+2. Click Add Staff
+3. Enter their Name and Email (required)
+4. Tick their Assigned services
+5. Click Save
 
-Staff roles: Admin, Manager, Staff.
-Working hours: set per-day start and end times.`,
+Sign-in roles: Owner, Staff.
+Working hours and time off are set in Availability.`,
   });
 
   indexDocument({
@@ -108,13 +103,12 @@ Working hours: set per-day start and end times.`,
 A customer is a person who books appointments.
 
 Adding a customer:
-1. Go to Customers at /customers/new
-2. Enter the Full Name (required)
-3. Enter the Email (required)
-4. Optionally add Phone, Timezone, Tags, Notes
-5. Click Create Customer
+1. Go to Customers at /customers and click Add Customer
+2. Enter the Name (required)
+3. Enter a Phone number or an Email address (at least one)
+4. Click Add Customer
 
-Errors: "A customer with that email already exists" means you should update the existing record.`,
+Errors: "already has this email address" means you should open the existing customer.`,
   });
 
   indexDocument({
@@ -123,12 +117,22 @@ Errors: "A customer with that email already exists" means you should update the 
     category: 'settings',
     source: 'test/settings',
     content: `# Settings Guide
-Settings are at /settings. Tabs: Business Profile, Branding, Working Hours, Booking Rules, Cancellation Policy, Notifications, Roles & Permissions, Security, Language & Region.
+Settings are at /settings. Sections: Business Details, Services, Notifications, Public Booking, Team, Internal Automation, Integrations.
 
-Business Profile: set organization name, email, phone, address.
-Working Hours: toggle days, set start and end times.
-Security / Change Password: enter current password, new password (min 8 chars, one uppercase, one number), confirm.
-Two-factor authentication is not yet available.`,
+Business Details: set the business name, contact email, phone, timezone and appointment location.
+Working hours are not in Settings: they are in Availability.`,
+  });
+
+  indexDocument({
+    id: 'test-account',
+    title: 'My Account Guide',
+    category: 'account',
+    source: 'test/account',
+    content: `# My Account Guide
+My Account is at /account.
+
+Change Password: enter your current password, a new password (min 8 chars, one uppercase, one number) and confirm it, then click Update Password.
+Two-factor authentication: turn it on with an authenticator app.`,
   });
 
   indexDocument({
@@ -138,11 +142,11 @@ Two-factor authentication is not yet available.`,
     source: 'test/troubleshoot',
     content: `# Troubleshooting
 
-"This time slot is no longer available" — Someone else booked the slot. Choose a different time.
+"That time slot is no longer available" — Someone else booked the slot. Choose a different time.
 "Cannot create appointments in the past" — Selected date is before today. Choose today or a future date.
-"A customer with that email already exists" — Search for the customer and update their record.
-"Page not found" on booking page — Check that the booking page is published.
-Staff not showing — The staff member must be Active and assigned to the service.
+"already has this email address" — Open the existing customer instead of adding another.
+"Booking page not found" — Online booking is switched off in Settings → Public Booking.
+Staff not showing — The staff member must be Active and have the service under Assigned services.
 Service not showing — Check that the service is Active.`,
   });
 });
@@ -259,7 +263,7 @@ describe('localAnswer', () => {
   it('never calls external APIs (no HTTP requests in answer engine)', async () => {
     // Verify no fetch/http calls happen — the function is synchronous retrieval only
     // If we reach here without hanging or throwing HTTP errors, we pass
-    const result = await localAnswer('how to create a booking page');
+    const result = await localAnswer('how do I share my booking link');
     expect(typeof result.answer).toBe('string');
   });
 
@@ -315,11 +319,12 @@ describe('intent router — 8 query scenarios', () => {
     expect(r.entities.personName).toContain('Alice');
   });
 
-  it('navigation: "Take me to the reports page" → navigation with /reports', () => {
+  it('navigation: "Take me to the reports page" → Appointments, saying Reports are not available', () => {
     const r = routeIntent('Take me to the reports page');
     expect(r.intent).toBe('navigation');
-    expect(r.entities.routePath).toBe('/reports');
-    expect(r.entities.routeTitle).toBe('Reports');
+    expect(r.entities.routePath).toBe('/appointments');
+    expect(r.entities.routeTitle).toBe('Appointments');
+    expect(r.entities.routeNote).toMatch(/Reports are not available/);
   });
 
   it('out-of-scope: "What is the capital of France?" → out_of_scope', () => {
@@ -377,6 +382,17 @@ describe('localAnswer — 8 query scenarios end-to-end', () => {
     expect(prop?.status).toBe('pending');
     // Answer must be non-empty and reference the service
     expect(result.answer.length).toBeGreaterThan(20);
+    // V4 services have a name and a duration only: no price is asked for or shown.
+    const labels = result.proposalDisplayData!.fields.map(f => f.label);
+    expect(labels).toEqual(expect.arrayContaining(['Name', 'Duration']));
+    expect(labels).not.toContain('Price');
+    expect(result.answer).toMatch(/no price/);
+  });
+
+  it('a service request with a duration but no price is prepared without asking for a price', async () => {
+    const result = await localAnswer('Create a 45-minute haircut service', 5, MOCK_USER);
+    expect(result.type).toBe('action_proposal');
+    expect(result.answer).not.toMatch(/price/i);
   });
 
   it('search "Find customer Alice Johnson" → search_results type, not creation docs', async () => {
@@ -388,18 +404,19 @@ describe('localAnswer — 8 query scenarios end-to-end', () => {
     expect(result.answer).toMatch(/found|no customer|matching/i);
   });
 
-  it('navigation "Take me to the reports page" → navigation type, navigateTo = /reports', async () => {
+  it('navigation "Take me to the reports page" → explains Reports were removed and opens Appointments', async () => {
     const result = await localAnswer('Take me to the reports page');
     expect(result.type).toBe('navigation');
-    expect(result.navigateTo).toBe('/reports');
-    expect(result.navigationTitle).toBe('Reports');
+    expect(result.navigateTo).toBe('/appointments');
+    expect(result.navigationTitle).toBe('Appointments');
+    expect(result.answer).toMatch(/Reports are not available in WorkEasy360 Booking/);
   });
 
   it('out-of-scope "What is the capital of France?" → out_of_scope, no FAQ answer', async () => {
     const result = await localAnswer('What is the capital of France?');
     expect(result.type).toBe('out_of_scope');
     // Must not return an unrelated WorkEasy360 FAQ (like password help)
-    expect(result.answer.toLowerCase()).not.toMatch(/password|two-factor|workhour|booking/i);
+    expect(result.answer.toLowerCase()).not.toMatch(/password|two-factor|workhour|working hours/i);
     expect(result.answer).toMatch(/outside|platform|workeasy/i);
   });
 });
@@ -440,10 +457,34 @@ describe('intent router — edge cases', () => {
     expect(r.entities.recordType).toBe('staff');
   });
 
-  it('"Go to calendar" → navigation, /calendar', () => {
+  it('"Go to calendar" → navigation, the calendar view of Appointments', () => {
     const r = routeIntent('Go to calendar');
     expect(r.intent).toBe('navigation');
-    expect(r.entities.routePath).toBe('/calendar');
+    expect(r.entities.routePath).toBe('/appointments?view=calendar');
+  });
+
+  it.each([
+    ['open availability', '/availability'],
+    ['take me to staff', '/settings/team'],
+    ['go to team settings', '/settings/team'],
+    ['open booking settings', '/settings/public-booking'],
+    ['go to services', '/settings/services'],
+    ['open my account', '/account'],
+    ['go to notifications', '/settings/notifications'],
+    ['go to integrations', '/settings/integrations'],
+    ['go to the dashboard', '/appointments'],
+    ['open my space', '/appointments'],
+  ])('"%s" → navigation to the V4 screen %s', (query, route) => {
+    const r = routeIntent(query);
+    expect(r.intent).toBe('navigation');
+    expect(r.entities.routePath).toBe(route);
+  });
+
+  it('screens of earlier versions are never navigation targets', () => {
+    for (const q of ['go to reports', 'open workspaces', 'open resources', 'go to dashboard', 'open booking pages', 'go to my space']) {
+      const r = routeIntent(q);
+      expect(r.entities.routePath ?? '').not.toMatch(/^\/(reports|workspaces|resources|dashboard|booking-pages|my-space|calendar|staff|services)\b/);
+    }
   });
 
   it('"appointment kaise create karein" → platform_how_to (Hinglish)', () => {
@@ -643,13 +684,13 @@ describe('ai_workflows — availability_request flow', () => {
     expect(result.workflowInfo!.actions.length).toBe(2);
   });
 
-  // ── Test 3: First action navigates to /services/new ─────────────────────────
-  it('first workflow action navigates to /services/new', async () => {
+  // ── Test 3: First action opens Settings → Services ───────────────────────────
+  it('first workflow action opens Settings → Services', async () => {
     const result = await localAnswer('Show available slots for tomorrow', 5, WF_USER);
     const navAction = result.workflowInfo!.actions.find(a => a.intent === 'navigate');
     expect(navAction).toBeDefined();
-    expect(navAction!.navigateTo).toBe('/services/new');
-    expect(navAction!.label).toBe('Create a service');
+    expect(navAction!.navigateTo).toBe('/settings/services');
+    expect(navAction!.label).toBe('Add a service');
   });
 
   // ── Test 4: Second action is cancel_workflow ─────────────────────────────────
@@ -806,10 +847,16 @@ describe('synonym regression — routeIntent', () => {
 
   // ── Navigation ────────────────────────────────────────────────────────────
 
-  it('"take me to reports" → navigation, /reports', () => {
+  it('"take me to reports" → navigation to Appointments (Reports were removed)', () => {
     const r = routeIntent('take me to reports');
     expect(r.intent).toBe('navigation');
-    expect(r.entities.routePath).toBe('/reports');
+    expect(r.entities.routePath).toBe('/appointments');
+  });
+
+  it('"what reports are available" is not an availability question', () => {
+    const r = routeIntent('what reports are available');
+    expect(r.intent).not.toBe('availability_query');
+    expect(r.featureCategories).toContain('limitations');
   });
 
   // ── Out-of-scope must stay out-of-scope ───────────────────────────────────
@@ -878,16 +925,17 @@ describe('15-query regression — queries 11–15', () => {
 
   // ── Query 11: Settings / password ────────────────────────────────────────
 
-  it('11 routeIntent "How do I change my password?" → platform_how_to, settings', () => {
+  it('11 routeIntent "How do I change my password?" → platform_how_to, My Account', () => {
     const r = routeIntent('How do I change my password?');
     expect(r.intent).toBe('platform_how_to');
-    expect(r.featureCategories).toContain('settings');
+    expect(r.featureCategories).toContain('account');
   });
 
-  it('11 localAnswer "How do I change my password?" → settings doc, non-empty', async () => {
+  it('11 localAnswer "How do I change my password?" → My Account doc, non-empty', async () => {
     const result = await localAnswer('How do I change my password?');
     expect(result.type).not.toBe('out_of_scope');
     expect(result.answer.length).toBeGreaterThan(10);
+    expect(result.sources[0]).toBe('My Account Guide');
     // Must not drift into appointment creation steps
     expect(result.answer.toLowerCase()).not.toMatch(/go to appointments.*\/appointments\/new/i);
   });

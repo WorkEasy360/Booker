@@ -256,7 +256,8 @@ router.delete('/:id/photo', requireAdmin, async (req: AuthRequest, res, next) =>
 
 // ─── Sign-in access ───────────────────────────────────────────────────────────
 
-const InviteSchema = z.object({ role: z.enum(['staff', 'manager']).default('staff') });
+// V4 Team: "Staff" or "Owner" (admin); 'manager' stays accepted for earlier clients.
+const InviteSchema = z.object({ role: z.enum(['staff', 'manager', 'admin']).default('staff') });
 
 router.post('/:id/invitations', requireAdmin, async (req: AuthRequest, res, next) => {
   try {

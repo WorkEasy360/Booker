@@ -21,8 +21,13 @@ export function providerMode(env = process.env): ProviderMode {
 
 // ─── Rules ───────────────────────────────────────────────────────────────────
 
-/** Customer booking emails (confirmation, reschedule, cancellation) always go out: they carry the manage link. */
-export const ALWAYS_ON = new Set(['confirmed:customer:email', 'rescheduled:customer:email', 'cancelled:customer:email']);
+/**
+ * Rules that cannot be switched off. V4 (Settings → Notifications, "Email On / Off"): none — customer booking emails
+ * are on by default (CUSTOMER_EMAIL_DEFAULT_ON) and the business may switch them off; the booking is unaffected.
+ */
+export const ALWAYS_ON = new Set<string>();
+/** Customer booking emails that are on until the business switches them off. */
+const CUSTOMER_EMAIL_DEFAULT_ON = new Set(['confirmed:customer:email', 'rescheduled:customer:email', 'cancelled:customer:email']);
 /** The combinations a business can switch; the business role is set per recipient, the calendar in its own settings. */
 export const SWITCHABLE: Array<{ role: 'customer' | 'staff'; channel: MessageChannel }> = [
   { role: 'customer', channel: 'email' }, { role: 'customer', channel: 'sms' }, { role: 'customer', channel: 'whatsapp' },
@@ -32,7 +37,7 @@ const key = (e: string, r: string, c: string) => `${e}:${r}:${c}`;
 
 /** Before a business saves its own rules: the behaviour it had (staff alerts and reminders from its earlier settings). */
 function defaultRule(orgId: string, event: NotificationEvent, role: RecipientRole, channel: Channel): boolean {
-  if (ALWAYS_ON.has(key(event, role, channel))) return true;
+  if (ALWAYS_ON.has(key(event, role, channel)) || CUSTOMER_EMAIL_DEFAULT_ON.has(key(event, role, channel))) return true;
   const prefs = getPreferences(orgId);
   if (role === 'customer' && channel === 'email' && event === 'reminder') return prefs.remindersEnabled;
   if (role === 'staff' && channel === 'email' && ['confirmed', 'rescheduled', 'cancelled'].includes(event)) return prefs.staffAlertsEnabled;

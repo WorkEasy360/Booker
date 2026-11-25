@@ -1,12 +1,12 @@
 {
-  "name": "WorkeasyBooking",
-  "short_name": "WorkeasyBooking",
-  "description": "Smart appointment scheduling for businesses. A WorkEasy360 Product.",
+  "name": "WorkEasy360 Booking",
+  "short_name": "WorkEasy360 Booking",
+  "description": "Simple appointment scheduling for growing businesses. A WorkEasy360 Product.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#F6F8F9",
-  "theme_color": "#13222E",
+  "theme_color": "#0B3D35",
   "icons": [
     { "src": "/brand/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png" }

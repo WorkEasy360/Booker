@@ -14,9 +14,11 @@ interface AuthContextValue {
   /** Set when the session could not be checked for a reason other than being signed out. */
   connectionError: string | null;
   retrySession: () => void;
-  login: (email: string, password: string) => Promise<LoginOutcome>;
+  /** Updates the signed-in person in place (for example after a new profile photo). */
+  updateUser: (changes: Partial<AuthUser>) => void;
+  login: (email: string, password: string, remember?: boolean) => Promise<LoginOutcome>;
   /** Finishes a two-factor sign-in with a code from the authenticator app or a recovery code. */
-  completeTwoFactor: (challenge: string, factor: SecondFactor) => Promise<AuthUser>;
+  completeTwoFactor: (challenge: string, factor: SecondFactor, remember?: boolean) => Promise<AuthUser>;
   /** Asks for a sign-up confirmation email; does not sign in. Resolves to the message to show. */
   signup: (data: { name: string; email: string; company: string; password: string; confirmPassword: string }) => Promise<string>;
   /** For flows that sign the user in themselves (accepting an invitation). */
@@ -61,8 +63,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
   }, []);
 
-  const login = useCallback(async (email: string, password: string): Promise<LoginOutcome> => {
-    const res = await apiLogin(email, password);
+  const login = useCallback(async (email: string, password: string, remember = true): Promise<LoginOutcome> => {
+    const res = await apiLogin(email, password, remember);
     if (res.twoFactorRequired) return { twoFactor: { challenge: res.challenge, expiresAt: res.expiresAt } };
     // The server sets the HttpOnly we360_session cookie on login.
     // We only store the user profile in React state (never in localStorage).
@@ -70,8 +72,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { user: res.user };
   }, []);
 
-  const completeTwoFactor = useCallback(async (challenge: string, factor: SecondFactor) => {
-    const { user: u } = await loginSecondStep(challenge, factor);
+  const completeTwoFactor = useCallback(async (challenge: string, factor: SecondFactor, remember = true) => {
+    const { user: u } = await loginSecondStep(challenge, factor, remember);
     setUser(u);
     return u;
   }, []);
@@ -83,6 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signedIn = useCallback((u: AuthUser) => { setUser(u); setConnectionError(null); }, []);
+  const updateUser = useCallback((changes: Partial<AuthUser>) => setUser(u => (u ? { ...u, ...changes } : u)), []);
 
   const logout = useCallback(async () => {
     await apiLogout().catch(() => { /* ignore network errors on logout */ });
@@ -97,7 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const can = useCallback((permission: Permission) => hasPermission(user?.permissions, permission), [user]);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, connectionError, retrySession, login, completeTwoFactor, signup, signedIn, logout, can }}>
+    <AuthContext.Provider value={{ user, isLoading, connectionError, retrySession, updateUser, login, completeTwoFactor, signup, signedIn, logout, can }}>
       {children}
     </AuthContext.Provider>
   );

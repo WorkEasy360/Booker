@@ -1,6 +1,6 @@
 import db from '../../db/init';
 import { DEFAULT_TIMEZONE } from '../business-locale';
-import { issueManageToken, emailLinkExpiry } from '../booking-access';
+import { issueManageToken, emailLinkExpiry, customerContact } from '../booking-access';
 import { getPreferences, getTemplate, type BookingLanguage } from '../email/preferences';
 import {
   renderAppointmentEmail, renderSimpleEmail, formatSlot, formatEmailDate, formatEmailTime, type AppointmentEmailData,
@@ -36,7 +36,7 @@ export function emailData(a: AppointmentInfo, appUrl: string, previous?: { date:
     businessName: a.org_name, customerName: a.customer_name, bookingRef: a.booking_ref, serviceName: a.service_name, staffName: a.staff_name,
     date: a.date, startTime: a.start_time, endTime: a.end_time, timezone: a.timezone || DEFAULT_TIMEZONE,
     timeFormat: a.time_format === '24h' ? '24h' : '12h', location: a.location ?? undefined,
-    manageUrl: `${appUrl}/book/lookup/manage#token=${encodeURIComponent(issueManageToken(a.id, a.customer_email, emailLinkExpiry(a.date)))}`,
+    manageUrl: `${appUrl}/book/lookup/manage#token=${encodeURIComponent(issueManageToken(a.id, customerContact(a.customer_email, a.customer_phone), emailLinkExpiry(a.date)))}`,
     previous,
   };
 }

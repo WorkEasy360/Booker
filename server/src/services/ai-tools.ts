@@ -3,6 +3,10 @@
  * Each tool declares its schema, permissions, and whether it requires confirmation.
  * Read-only tools execute immediately.
  * Write tools create a pending proposal for the user to confirm.
+ *
+ * V4 product: four menus (Appointments with its calendar view, Availability, Customers, Settings) and My Account.
+ * Services have a name and a duration only (no prices or categories); customers need a phone number or an email
+ * address; appointment statuses are scheduled, completed, cancelled and no_show.
  */
 
 import db from '../db/init';
@@ -12,9 +16,13 @@ import { todayInTimezone, getOrgTimezone, freeTimesByStaff } from './availabilit
 import { staffSlotProblem } from './bookability';
 import { addMinutesToTime } from './zoned-time';
 import { sendAppointmentEmail } from './email/notify';
+import { appointmentLocation, syncDefaultBookingPage } from './default-booking-page';
 import { appointmentState, recordCreated } from './appointment-history';
 import { chooseResources, holdResources } from './resources';
+import { syncServiceStaff } from './relations';
 import { CUSTOMER_BOOKING_COUNT } from './customer-bookings';
+import { DEFAULT_CURRENCY } from './business-locale';
+import { normalizePhone } from '../lib/phone';
 import { can, PROPOSAL_PERMISSIONS } from '../auth/permissions';
 
 // ─── Proposal lifecycle ───────────────────────────────────────────────────────
@@ -100,33 +108,105 @@ function auditLog(
   );
 }
 
-// ─── Tool definitions (passed to Claude as tool schemas) ──────────────────────
+// ─── Pages the assistant can open ─────────────────────────────────────────────
+
+/** Every screen of the V4 app, by the name the model uses. Earlier screens (dashboard, reports, workspaces…) are gone. */
+export const PAGE_ROUTES = {
+  'appointments': '/appointments',
+  'calendar': '/appointments?view=calendar',
+  'new-appointment': '/appointments/new',
+  'availability': '/availability',
+  'customers': '/customers',
+  'new-customer': '/customers/new',
+  'settings': '/settings',
+  'business-details': '/settings/business',
+  'services': '/settings/services',
+  'notifications': '/settings/notifications',
+  'public-booking': '/settings/public-booking',
+  'team': '/settings/team',
+  'automation': '/settings/automation',
+  'integrations': '/settings/integrations',
+  'my-account': '/account',
+} as const;
+
+export type PageName = keyof typeof PAGE_ROUTES;
+export const PAGE_NAMES = Object.keys(PAGE_ROUTES) as [PageName, ...PageName[]];
+
+// ─── Appointment counts ───────────────────────────────────────────────────────
+
+export const SUMMARY_PERIODS = ['today', 'tomorrow', 'this_week', 'this_month', 'last_7_days', 'last_30_days'] as const;
+export type SummaryPeriod = typeof SUMMARY_PERIODS[number];
+
+/** YYYY-MM-DD plus whole days (calendar arithmetic, no time zone involved). */
+export function shiftDate(iso: string, days: number): string {
+  const d = new Date(`${iso}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** First and last date of a period counted from the business's today. Weeks run Monday to Sunday. */
+export function periodRange(period: SummaryPeriod, today: string): { from: string; to: string; label: string } {
+  switch (period) {
+    case 'today': return { from: today, to: today, label: 'today' };
+    case 'tomorrow': { const t = shiftDate(today, 1); return { from: t, to: t, label: 'tomorrow' }; }
+    case 'this_week': {
+      const monday = shiftDate(today, -((new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7));
+      return { from: monday, to: shiftDate(monday, 6), label: 'this week' };
+    }
+    case 'this_month': {
+      const [y, m] = [Number(today.slice(0, 4)), Number(today.slice(5, 7))];
+      return { from: `${today.slice(0, 7)}-01`, to: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10), label: 'this month' };
+    }
+    case 'last_7_days': return { from: shiftDate(today, -6), to: today, label: 'in the last 7 days' };
+    case 'last_30_days': return { from: shiftDate(today, -29), to: today, label: 'in the last 30 days' };
+  }
+}
+
+export interface AppointmentCounts { total: number; scheduled: number; completed: number; cancelled: number; noShow: number }
+
+/** Appointments of the business between two dates (inclusive), by status. */
+export function appointmentCounts(orgId: string, from: string, to: string): AppointmentCounts {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS total,
+      SUM(CASE WHEN status IN ('scheduled', 'confirmed') THEN 1 ELSE 0 END) AS scheduled,
+      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
+      SUM(CASE WHEN status = 'no_show' THEN 1 ELSE 0 END) AS noShow
+    FROM appointments WHERE organization_id = ? AND date >= ? AND date <= ?
+  `).get(orgId, from, to) as Partial<AppointmentCounts>;
+  return {
+    total: row.total ?? 0, scheduled: row.scheduled ?? 0, completed: row.completed ?? 0,
+    cancelled: row.cancelled ?? 0, noShow: row.noShow ?? 0,
+  };
+}
+
+// ─── Tool definitions (passed to the model as tool schemas) ───────────────────
 
 export const TOOL_DEFINITIONS = [
   {
     name: 'navigate_to_page',
-    description: 'Navigate the user to a specific page in the WorkEasy360 dashboard. Use for read-only navigation — this does NOT create or change any data.',
+    description: 'Open a screen of WorkEasy360 Booking for the user. Read-only: it does not create or change any data. '
+      + 'Pages: appointments (list, today\'s figures, booking link), calendar (calendar view of appointments), new-appointment, '
+      + 'availability (business and staff working hours, breaks, holidays and time off), customers, new-customer, settings, '
+      + 'business-details (name, contact details, timezone, location), services, notifications (email, WhatsApp, SMS, reminder), '
+      + 'public-booking (accept online bookings, booking link, change cutoff), team (staff members and their sign-in), '
+      + 'automation, integrations (webhooks), my-account (password, two-factor sign-in, language, plan and wallets).',
     input_schema: {
       type: 'object' as const,
       required: ['page'],
       properties: {
         page: {
           type: 'string',
-          enum: [
-            'dashboard', 'appointments', 'appointments/new', 'calendar',
-            'customers', 'customers/new', 'services', 'services/new',
-            'staff', 'staff/new', 'workspaces', 'resources',
-            'booking-pages', 'reports', 'settings', 'my-space',
-          ],
-          description: 'The page to navigate to',
+          enum: [...PAGE_NAMES],
+          description: 'The page to open',
         },
-        reason: { type: 'string', description: 'Brief reason for navigating here' },
+        reason: { type: 'string', description: 'Brief reason for opening it' },
       },
     },
   },
   {
     name: 'search_records',
-    description: 'Search for customers, services, or staff by name or keyword. Returns matching records from the database.',
+    description: 'Search this business\'s customers (by name, phone or email), services, staff members or appointments (by customer name, service or booking reference). Returns matching records.',
     input_schema: {
       type: 'object' as const,
       required: ['recordType', 'query'],
@@ -135,13 +215,13 @@ export const TOOL_DEFINITIONS = [
           type: 'string',
           enum: ['customers', 'services', 'staff', 'appointments'],
         },
-        query: { type: 'string', description: 'Search keyword or name to look for' },
+        query: { type: 'string', description: 'Name, phone number, email, service or booking reference to look for (empty lists the first records)' },
       },
     },
   },
   {
     name: 'get_availability',
-    description: 'Check available appointment slots for a service on a given date. Returns time slots.',
+    description: 'Free appointment times for a service on a date, per staff member, with the same rules as the New Appointment form (working hours, breaks, date exceptions, other appointments).',
     input_schema: {
       type: 'object' as const,
       required: ['date', 'serviceId'],
@@ -153,41 +233,34 @@ export const TOOL_DEFINITIONS = [
     },
   },
   {
-    name: 'get_dashboard_summary',
-    description: 'Get a summary of key business metrics: appointment counts, revenue, top services.',
+    name: 'get_appointment_summary',
+    description: 'Count this business\'s appointments for a period (in the business timezone) by status: scheduled, completed, cancelled and no-show, plus upcoming appointments and total customers. There are no prices or revenue.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        range: {
+        period: {
           type: 'string',
-          enum: ['7d', '30d', '3m', '1y'],
-          description: 'Time range for the summary (default 30d)',
+          enum: [...SUMMARY_PERIODS],
+          description: 'Period to count (default this_week)',
         },
       },
     },
   },
   {
     name: 'propose_create_service',
-    description: 'Prepare a proposal to create a new service. The user must confirm before the service is actually created.',
+    description: 'Prepare a new service (a name and a duration in minutes; services have no price). Every active staff member will offer it. The user must confirm before it is created.',
     input_schema: {
       type: 'object' as const,
-      required: ['name', 'duration', 'price'],
+      required: ['name', 'duration'],
       properties: {
         name: { type: 'string', description: 'Service name' },
-        duration: { type: 'number', description: 'Duration in minutes (e.g. 30, 60, 90)' },
-        price: { type: 'number', description: 'Price (numeric, e.g. 500)' },
-        category: {
-          type: 'string',
-          enum: ['consultation', 'class', 'workshop', 'session', 'tour', 'rental', 'other'],
-        },
-        description: { type: 'string' },
-        location: { type: 'string' },
+        duration: { type: 'number', description: 'Duration in whole minutes, 5 to 1440 (e.g. 30, 45, 60)' },
       },
     },
   },
   {
     name: 'propose_create_appointment',
-    description: 'Prepare a proposal to create a new appointment. The user must confirm before it is saved. Checks for conflicts first.',
+    description: 'Prepare a new appointment. The time must be free for the staff member (check get_availability first). The user must confirm before it is saved; the customer then gets the booking confirmation.',
     input_schema: {
       type: 'object' as const,
       required: ['serviceId', 'staffId', 'customerId', 'date', 'startTime'],
@@ -197,21 +270,20 @@ export const TOOL_DEFINITIONS = [
         customerId: { type: 'string' },
         date: { type: 'string', description: 'YYYY-MM-DD' },
         startTime: { type: 'string', description: 'HH:MM (24-hour)' },
-        notes: { type: 'string' },
+        internalNote: { type: 'string', description: 'Optional private note for the team, never shown to the customer' },
       },
     },
   },
   {
     name: 'propose_create_customer',
-    description: 'Prepare a proposal to create a new customer. The user must confirm before the customer is saved.',
+    description: 'Prepare a new customer: a name plus a phone number or an email address (at least one). The user must confirm before the customer is saved.',
     input_schema: {
       type: 'object' as const,
-      required: ['name', 'email'],
+      required: ['name'],
       properties: {
         name: { type: 'string' },
         email: { type: 'string' },
         phone: { type: 'string' },
-        notes: { type: 'string' },
       },
     },
   },
@@ -240,8 +312,8 @@ export function executeTool(
         return executeSearch(input, user);
       case 'get_availability':
         return executeAvailability(input, user);
-      case 'get_dashboard_summary':
-        return executeDashboardSummary(input, user);
+      case 'get_appointment_summary':
+        return executeAppointmentSummary(input, user);
       case 'propose_create_service':
         return executePropose('propose_create_service', input, user, conversationId);
       case 'propose_create_appointment':
@@ -258,63 +330,89 @@ export function executeTool(
 
 function executeNavigate(input: Record<string, unknown>): ToolResult {
   const page = input.page as string;
-  return {
-    type: 'result',
-    content: { navigated: true, page },
-    navigate: `/${page}`,
-  };
+  const route = Object.prototype.hasOwnProperty.call(PAGE_ROUTES, page) ? PAGE_ROUTES[page as PageName] : undefined;
+  if (!route) return { type: 'error', content: `Unknown page: ${page}` };
+  return { type: 'result', content: { navigated: true, page }, navigate: route };
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  scheduled: 'Scheduled', confirmed: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled', no_show: 'No-show',
+};
+export const statusLabel = (status: string): string => STATUS_LABEL[status] ?? status;
+
+const like = (q: string) => `%${q.replace(/[\\%_]/g, m => '\\' + m)}%`;
+const digitsOf = (q: string) => q.replace(/[\s\-+().]/g, '');
+
+/** Customers matching a name, email or phone (spaces, dashes and the + of a number are ignored). */
+export function findCustomers(orgId: string, query: string, limit = 10): Array<Record<string, unknown>> {
+  const q = query.toLowerCase().trim();
+  const digits = digitsOf(q);
+  const phoneMatch = /^\d{3,}$/.test(digits)
+    ? ` OR replace(replace(replace(replace(replace(COALESCE(phone, ''), ' ', ''), '-', ''), '+', ''), '(', ''), ')', '') LIKE ? ESCAPE '\\'`
+    : '';
+  const params: unknown[] = [orgId, like(q), like(q)];
+  if (phoneMatch) params.push(like(digits));
+  return db.prepare(`
+    SELECT id, name, NULLIF(email, '') AS email, phone, ${CUSTOMER_BOOKING_COUNT} AS totalBookings
+    FROM customers WHERE organization_id = ?
+      AND (LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(email) LIKE ? ESCAPE '\\'${phoneMatch})
+    ORDER BY name LIMIT ${limit}
+  `).all(...params) as Array<Record<string, unknown>>;
+}
+
+export function findServices(orgId: string, query: string, limit = 10): Array<Record<string, unknown>> {
+  return (db.prepare(`
+    SELECT id, name, duration, is_active AS isActive FROM services
+    WHERE organization_id = ? AND LOWER(name) LIKE ? ESCAPE '\\' ORDER BY is_active DESC, name LIMIT ${limit}
+  `).all(orgId, like(query.toLowerCase().trim())) as Array<Record<string, unknown>>)
+    .map(s => ({ ...s, isActive: !!s.isActive }));
+}
+
+export function findStaff(orgId: string, query: string, limit = 10): Array<Record<string, unknown>> {
+  const q = like(query.toLowerCase().trim());
+  return (db.prepare(`
+    SELECT id, name, email, phone, is_active AS isActive FROM staff
+    WHERE organization_id = ? AND (LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(email) LIKE ? ESCAPE '\\')
+    ORDER BY is_active DESC, name LIMIT ${limit}
+  `).all(orgId, q, q) as Array<Record<string, unknown>>).map(s => ({ ...s, isActive: !!s.isActive }));
+}
+
+export function findAppointments(orgId: string, query: string, limit = 10): Array<Record<string, unknown>> {
+  const q = like(query.toLowerCase().trim());
+  return (db.prepare(`
+    SELECT a.id, a.booking_ref AS bookingRef, a.date, a.start_time AS startTime, a.end_time AS endTime, a.status,
+           s.name AS serviceName, st.name AS staffName, c.name AS customerName
+    FROM appointments a
+    JOIN services s ON a.service_id = s.id
+    JOIN staff st ON a.staff_id = st.id
+    JOIN customers c ON a.customer_id = c.id
+    WHERE a.organization_id = ?
+      AND (LOWER(c.name) LIKE ? ESCAPE '\\' OR LOWER(s.name) LIKE ? ESCAPE '\\' OR LOWER(a.booking_ref) LIKE ? ESCAPE '\\'
+           OR COALESCE(c.phone, '') LIKE ? ESCAPE '\\')
+    ORDER BY a.date DESC, a.start_time DESC LIMIT ${limit}
+  `).all(orgId, q, q, q, q) as Array<Record<string, unknown>>)
+    .map(a => ({ ...a, status: statusLabel(a.status as string) }));
+}
+
+/** The permission a record search needs (the same as the page that lists those records). */
+function canSearch(user: AuthPayload, recordType: string): boolean {
+  if (recordType === 'customers') return can(user.role, 'customers:read');
+  if (recordType === 'appointments') return can(user.role, 'appointments:read');
+  return can(user.role, 'catalog:read');
 }
 
 function executeSearch(input: Record<string, unknown>, user: AuthPayload): ToolResult {
   const recordType = input.recordType as string;
-  const query = ((input.query as string) ?? '').toLowerCase().trim();
+  const query = ((input.query as string) ?? '').trim();
+  if (!canSearch(user, recordType)) return { type: 'error', content: `This account cannot see ${recordType}.` };
 
-  let results: unknown[] = [];
+  const results = recordType === 'customers' ? findCustomers(user.orgId, query)
+    : recordType === 'services' ? findServices(user.orgId, query)
+    : recordType === 'staff' ? findStaff(user.orgId, query)
+    : recordType === 'appointments' ? findAppointments(user.orgId, query)
+    : [];
 
-  if (recordType === 'customers') {
-    results = (db.prepare(`
-      SELECT id, name, email, phone, ${CUSTOMER_BOOKING_COUNT} as totalBookings
-      FROM customers WHERE organization_id = ?
-        AND (LOWER(name) LIKE ? OR LOWER(email) LIKE ? OR phone LIKE ?)
-      ORDER BY name LIMIT 10
-    `).all(user.orgId, `%${query}%`, `%${query}%`, `%${query}%`) as unknown[]);
-  } else if (recordType === 'services') {
-    results = (db.prepare(`
-      SELECT id, name, duration, price, currency, category, is_active as isActive
-      FROM services WHERE organization_id = ? AND LOWER(name) LIKE ?
-      ORDER BY name LIMIT 10
-    `).all(user.orgId, `%${query}%`) as unknown[]);
-  } else if (recordType === 'staff') {
-    results = (db.prepare(`
-      SELECT id, name, email, role, title, is_active as isActive
-      FROM staff WHERE organization_id = ?
-        AND (LOWER(name) LIKE ? OR LOWER(email) LIKE ?)
-      ORDER BY name LIMIT 10
-    `).all(user.orgId, `%${query}%`, `%${query}%`) as unknown[]);
-  } else if (recordType === 'appointments') {
-    results = (db.prepare(`
-      SELECT a.id, a.booking_ref as bookingRef, a.date, a.start_time as startTime,
-             a.end_time as endTime, a.status,
-             s.name as serviceName, st.name as staffName, c.name as customerName
-      FROM appointments a
-      JOIN services s ON a.service_id = s.id
-      JOIN staff st ON a.staff_id = st.id
-      JOIN customers c ON a.customer_id = c.id
-      WHERE a.organization_id = ?
-        AND (LOWER(c.name) LIKE ? OR LOWER(s.name) LIKE ? OR a.booking_ref LIKE ?)
-      ORDER BY a.date DESC, a.start_time DESC LIMIT 10
-    `).all(user.orgId, `%${query}%`, `%${query}%`, `%${query}%`) as unknown[]);
-  }
-
-  return {
-    type: 'result',
-    content: {
-      recordType,
-      query,
-      count: results.length,
-      results,
-    },
-  };
+  return { type: 'result', content: { recordType, query, count: results.length, results } };
 }
 
 function executeAvailability(input: Record<string, unknown>, user: AuthPayload): ToolResult {
@@ -328,16 +426,18 @@ function executeAvailability(input: Record<string, unknown>, user: AuthPayload):
     return { type: 'result', content: { error: 'Cannot check availability for past dates', date } };
   }
 
-  // Get service details
-  const service = db.prepare('SELECT id, name, duration FROM services WHERE id = ? AND organization_id = ?')
-    .get(serviceId, user.orgId) as { id: string; name: string; duration: number } | undefined;
+  const service = db.prepare('SELECT id, name, duration, is_active FROM services WHERE id = ? AND organization_id = ?')
+    .get(serviceId, user.orgId) as { id: string; name: string; duration: number; is_active: number } | undefined;
 
   if (!service) {
     return { type: 'result', content: { error: 'Service not found', serviceId } };
   }
+  if (!service.is_active) {
+    return { type: 'result', content: { error: 'This service is inactive and cannot be booked. It can be activated in Settings → Services.', serviceId } };
+  }
 
   if (!assignedActiveStaff(user.orgId, serviceId, staffId)) {
-    return { type: 'result', content: { error: 'No active staff found for this service', serviceId } };
+    return { type: 'result', content: { error: 'No active staff member offers this service. Assign it in Settings → Team.', serviceId } };
   }
 
   // The same rules as the New Appointment form: hours, business hours, breaks, time off, closures, buffers.
@@ -348,6 +448,7 @@ function executeAvailability(input: Record<string, unknown>, user: AuthPayload):
     type: 'result',
     content: {
       date,
+      timezone: getOrgTimezone(user.orgId),
       serviceName: service.name,
       duration: service.duration,
       slotsPerStaff,
@@ -367,40 +468,55 @@ function assignedActiveStaff(orgId: string, serviceId: string, staffId?: string)
     .get(...ids, orgId);
 }
 
-function executeDashboardSummary(input: Record<string, unknown>, user: AuthPayload): ToolResult {
-  const range = (input.range as string) ?? '30d';
-  const days = range === '7d' ? 7 : range === '3m' ? 90 : range === '1y' ? 365 : 30;
-  const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
-
-  const totals = db.prepare(`
-    SELECT
-      COUNT(*) as total,
-      SUM(CASE WHEN status != 'cancelled' THEN price ELSE 0 END) as revenue,
-      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
-      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
-    FROM appointments WHERE organization_id = ? AND date >= ?
-  `).get(user.orgId, since) as { total: number; revenue: number; cancelled: number; completed: number };
+function executeAppointmentSummary(input: Record<string, unknown>, user: AuthPayload): ToolResult {
+  if (!can(user.role, 'appointments:read')) return { type: 'error', content: 'This account cannot see all appointments.' };
+  const period = (SUMMARY_PERIODS as readonly string[]).includes(input.period as string) ? input.period as SummaryPeriod : 'this_week';
+  const timezone = getOrgTimezone(user.orgId);
+  const today = todayInTimezone(timezone);
+  const { from, to } = periodRange(period, today);
+  const counts = appointmentCounts(user.orgId, from, to);
 
   const upcoming = (db.prepare(`
-    SELECT COUNT(*) as c FROM appointments
-    WHERE organization_id = ? AND date >= ? AND status NOT IN ('cancelled', 'completed')
-  `).get(user.orgId, new Date().toISOString().slice(0, 10)) as { c: number }).c;
-
-  const customerCount = (db.prepare('SELECT COUNT(*) as c FROM customers WHERE organization_id = ?')
-    .get(user.orgId) as { c: number }).c;
+    SELECT COUNT(*) AS c FROM appointments WHERE organization_id = ? AND date >= ? AND status IN ('scheduled', 'confirmed')
+  `).get(user.orgId, today) as { c: number }).c;
+  const totalCustomers = (db.prepare('SELECT COUNT(*) AS c FROM customers WHERE organization_id = ?').get(user.orgId) as { c: number }).c;
 
   return {
     type: 'result',
     content: {
-      range, period: `${days} days`, since,
-      totalAppointments: totals.total,
-      revenue: totals.revenue ?? 0,
-      completed: totals.completed,
-      cancelled: totals.cancelled,
+      period, from, to, timezone,
+      totalAppointments: counts.total,
+      scheduled: counts.scheduled, completed: counts.completed, cancelled: counts.cancelled, noShow: counts.noShow,
       upcomingAppointments: upcoming,
-      totalCustomers: customerCount,
+      totalCustomers,
     },
   };
+}
+
+// ─── Proposals ────────────────────────────────────────────────────────────────
+
+/** A customer's contact details checked as the Customers screen checks them; an error message when they are refused. */
+function customerContact(orgId: string, input: Record<string, unknown>): { email: string; phone: string | null } | { error: string } {
+  const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
+  const rawPhone = typeof input.phone === 'string' ? input.phone.trim() : '';
+  if (!email && !rawPhone) return { error: 'A customer needs a phone number or an email address.' };
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'Enter a valid email address.' };
+  let phone: string | null = null;
+  if (rawPhone) {
+    const checked = normalizePhone(rawPhone);
+    if (!checked.ok) return { error: checked.error };
+    phone = checked.phone;
+  }
+  // Never a second record for the same person: the user opens the existing customer instead.
+  const byEmail = email
+    ? db.prepare("SELECT name FROM customers WHERE organization_id = ? AND email <> '' AND LOWER(email) = ?").get(orgId, email) as { name: string } | undefined
+    : undefined;
+  if (byEmail) return { error: `${byEmail.name} already has this email address. Use that customer instead.` };
+  const byPhone = phone
+    ? db.prepare('SELECT name FROM customers WHERE organization_id = ? AND phone = ? LIMIT 1').get(orgId, phone) as { name: string } | undefined
+    : undefined;
+  if (byPhone) return { error: `${byPhone.name} already has this phone number. Use that customer instead.` };
+  return { email, phone };
 }
 
 function executePropose(
@@ -409,68 +525,86 @@ function executePropose(
   user: AuthPayload,
   conversationId: string,
 ): ToolResult {
+  const needed = PROPOSAL_PERMISSIONS[toolName];
+  if (!needed || !can(user.role, needed)) return { type: 'error', content: 'This account does not have permission to do this.' };
+
   let displayData: Record<string, unknown> = {};
 
   if (toolName === 'propose_create_service') {
+    const name = String(input.name ?? '').trim();
+    const duration = Number(input.duration);
+    if (!name) return { type: 'error', content: 'A service needs a name.' };
+    if (!Number.isInteger(duration) || duration < 5 || duration > 1440) return { type: 'error', content: 'The duration must be whole minutes between 5 and 1440.' };
+    if (db.prepare('SELECT 1 FROM services WHERE organization_id = ? AND LOWER(name) = LOWER(?)').get(user.orgId, name)) {
+      return { type: 'error', content: `A service called ${name} already exists. It can be edited in Settings → Services.` };
+    }
+    input = { name, duration };
     displayData = {
       type: 'Create Service',
       fields: [
-        { label: 'Name', value: input.name },
-        { label: 'Duration', value: `${input.duration} minutes` },
-        { label: 'Price', value: input.price },
-        { label: 'Category', value: input.category ?? 'consultation' },
-        { label: 'Description', value: input.description ?? '—' },
-        { label: 'Location', value: input.location ?? '—' },
+        { label: 'Name', value: name },
+        { label: 'Duration', value: `${duration} minutes` },
+        { label: 'Offered by', value: 'Every active team member' },
       ],
     };
   } else if (toolName === 'propose_create_appointment') {
-    // Fetch names for display
-    const service = db.prepare('SELECT name, duration FROM services WHERE id = ? AND organization_id = ?')
-      .get(input.serviceId, user.orgId) as { name: string; duration: number } | undefined;
+    const service = db.prepare('SELECT name, duration, location FROM services WHERE id = ? AND organization_id = ?')
+      .get(input.serviceId, user.orgId) as { name: string; duration: number; location: string | null } | undefined;
     const staff = db.prepare('SELECT name FROM staff WHERE id = ? AND organization_id = ?')
       .get(input.staffId, user.orgId) as { name: string } | undefined;
-    const customer = db.prepare('SELECT name FROM customers WHERE id = ? AND organization_id = ?')
-      .get(input.customerId, user.orgId) as { name: string } | undefined;
+    const customer = db.prepare('SELECT name, email, phone FROM customers WHERE id = ? AND organization_id = ?')
+      .get(input.customerId, user.orgId) as { name: string; email: string | null; phone: string | null } | undefined;
 
     if (!service) return { type: 'error', content: 'Service not found' };
     if (!staff) return { type: 'error', content: 'Staff member not found' };
     if (!customer) return { type: 'error', content: 'Customer not found' };
 
     // Validate date is not past (the business's date)
-    if ((input.date as string) < todayInTimezone(getOrgTimezone(user.orgId))) {
+    const timezone = getOrgTimezone(user.orgId);
+    if ((input.date as string) < todayInTimezone(timezone)) {
       return { type: 'error', content: 'Cannot create appointments in the past.' };
     }
 
-    // The same rules as public and dashboard booking: grid, buffers, hours, breaks, time off, closures, conflicts.
+    // The same rules as public and in-app booking: grid, buffers, hours, breaks, time off, closures, conflicts.
     const problem = staffSlotProblem({
       orgId: user.orgId, staffId: input.staffId as string, serviceId: input.serviceId as string,
       date: input.date as string, startTime: input.startTime as string, requireActiveService: true,
     });
     if (problem) return { type: 'error', content: problem.error };
     const endTime = addMinutesToTime(input.startTime as string, service.duration);
+    const note = typeof input.internalNote === 'string' ? input.internalNote.trim() : '';
+    const location = appointmentLocation(user.orgId, service.location);
 
     displayData = {
       type: 'Create Appointment',
       fields: [
+        { label: 'Customer', value: customer.name },
         { label: 'Service', value: service.name },
         { label: 'Staff', value: staff.name },
-        { label: 'Customer', value: customer.name },
         { label: 'Date', value: input.date },
         { label: 'Time', value: `${input.startTime} – ${endTime}` },
-        { label: 'Notes', value: input.notes ?? '—' },
+        { label: 'Timezone', value: timezone },
+        ...(location ? [{ label: 'Location', value: location }] : []),
+        ...(note ? [{ label: 'Internal note', value: note }] : []),
+        ...(!customer.email ? [{ label: 'Note', value: 'No email address: the confirmation cannot be emailed to this customer.' }] : []),
       ],
     };
-    // Store computed endTime
-    input = { ...input, endTime };
-
+    input = {
+      serviceId: input.serviceId, staffId: input.staffId, customerId: input.customerId,
+      date: input.date, startTime: input.startTime, internalNote: note,
+    };
   } else if (toolName === 'propose_create_customer') {
+    const name = String(input.name ?? '').trim();
+    if (!name) return { type: 'error', content: 'A customer needs a name.' };
+    const contact = customerContact(user.orgId, input);
+    if ('error' in contact) return { type: 'error', content: contact.error };
+    input = { name, email: contact.email, phone: contact.phone };
     displayData = {
       type: 'Create Customer',
       fields: [
-        { label: 'Name', value: input.name },
-        { label: 'Email', value: input.email },
-        { label: 'Phone', value: input.phone ?? '—' },
-        { label: 'Notes', value: input.notes ?? '—' },
+        { label: 'Name', value: name },
+        { label: 'Phone', value: contact.phone || '—' },
+        { label: 'Email', value: contact.email || '—' },
       ],
     };
   }
@@ -547,19 +681,25 @@ export function executeConfirmedProposal(
   return { ok: true, result };
 }
 
+/** Saved the way Settings → Services saves a new service: name and duration, offered by every active team member. */
 function executeCreateService(input: Record<string, unknown>, user: AuthPayload) {
+  const name = String(input.name ?? '').trim();
+  const duration = Number(input.duration);
+  if (!name) throw new Error('A service needs a name.');
+  if (!Number.isInteger(duration) || duration < 5 || duration > 1440) throw new Error('The duration must be whole minutes between 5 and 1440.');
   const id = `svc-${nanoid(10)}`;
-  db.prepare(`
-    INSERT INTO services (id, organization_id, name, description, category, duration, price, currency, location, is_active)
-    VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT currency FROM organizations WHERE id = ?), ?, 1)
-  `).run(
-    id, user.orgId,
-    input.name, input.description ?? '', input.category ?? 'consultation',
-    Number(input.duration), Number(input.price),
-    user.orgId,
-    input.location ?? '',
-  );
-  return { id, name: input.name, type: 'service' };
+  db.transaction(() => {
+    const staffIds = (db.prepare('SELECT id FROM staff WHERE organization_id = ? AND is_active = 1').all(user.orgId) as Array<{ id: string }>).map(s => s.id);
+    const currency = (db.prepare('SELECT currency FROM organizations WHERE id = ?').get(user.orgId) as { currency: string | null } | undefined)?.currency
+      ?? DEFAULT_CURRENCY;
+    db.prepare(`
+      INSERT INTO services (id, organization_id, name, description, category, duration, price, currency, location, is_active, staff_ids)
+      VALUES (?, ?, ?, '', 'consultation', ?, 0, ?, '', 1, ?)
+    `).run(id, user.orgId, name, duration, currency, JSON.stringify(staffIds));
+    syncServiceStaff(user.orgId, id, staffIds);
+    syncDefaultBookingPage(user.orgId);
+  })();
+  return { id, name, duration, type: 'service' };
 }
 
 function executeCreateAppointment(input: Record<string, unknown>, user: AuthPayload) {
@@ -587,13 +727,15 @@ function executeCreateAppointment(input: Record<string, unknown>, user: AuthPayl
   const early = staffSlotProblem(slotCheck);
   if (early) throw new Error(early.error);
 
-  const { price: servicePrice, currency: serviceCurrency } = db.prepare('SELECT price, currency FROM services WHERE id = ?')
-    .get(input.serviceId) as { price: number; currency: string };
+  const { price: servicePrice, currency: serviceCurrency, location: serviceLocation } = db.prepare('SELECT price, currency, location FROM services WHERE id = ?')
+    .get(input.serviceId) as { price: number; currency: string; location: string | null };
 
   const id = `appt-${nanoid(10)}`;
   const bookingRef = `WE-${nanoid(8).toUpperCase()}`;
+  // Proposals made before internal notes existed carried "notes"; either way it is a private note for the team.
+  const internalNote = String(input.internalNote ?? input.notes ?? '').trim();
 
-  // Checked again under the write lock, so the check and the insert are atomic (as for dashboard bookings).
+  // Checked again under the write lock, so the check and the insert are atomic (as for in-app bookings).
   db.transaction(() => {
     const problem = staffSlotProblem(slotCheck);
     if (problem) throw new Error(problem.error);
@@ -604,14 +746,14 @@ function executeCreateAppointment(input: Record<string, unknown>, user: AuthPayl
     db.prepare(`
       INSERT INTO appointments
         (id, booking_ref, organization_id, service_id, staff_id, customer_id,
-         status, date, start_time, end_time, duration, timezone, price, currency, notes, resource_ids)
-      VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?, ?, ?, ?, '[]')
+         status, date, start_time, end_time, duration, timezone, price, currency, notes, internal_notes, resource_ids, location)
+      VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?, ?, ?, '', ?, '[]', ?)
     `).run(
       id, bookingRef, user.orgId,
       input.serviceId, input.staffId, input.customerId,
       input.date, input.startTime, endTime, service.duration,
       getOrgTimezone(user.orgId), servicePrice, serviceCurrency,
-      input.notes ?? '',
+      internalNote, appointmentLocation(user.orgId, serviceLocation),
     );
 
     // Update customer stats
@@ -628,16 +770,17 @@ function executeCreateAppointment(input: Record<string, unknown>, user: AuthPayl
 }
 
 function executeCreateCustomer(input: Record<string, unknown>, user: AuthPayload) {
-  // Check for duplicate email
-  const existing = db.prepare('SELECT id FROM customers WHERE organization_id = ? AND LOWER(email) = LOWER(?)')
-    .get(user.orgId, input.email);
-  if (existing) throw new Error(`A customer with email ${input.email} already exists.`);
+  // V4: a name plus a phone number or an email address, never a duplicate of an existing customer.
+  const name = String(input.name ?? '').trim();
+  if (!name) throw new Error('A customer needs a name.');
+  const contact = customerContact(user.orgId, input);
+  if ('error' in contact) throw new Error(contact.error);
 
   const id = `cust-${nanoid(10)}`;
   db.prepare(`
     INSERT INTO customers (id, organization_id, name, email, phone, notes, tags)
-    VALUES (?, ?, ?, ?, ?, ?, '[]')
-  `).run(id, user.orgId, input.name, input.email, input.phone ?? null, input.notes ?? '');
+    VALUES (?, ?, ?, ?, ?, '', '[]')
+  `).run(id, user.orgId, name, contact.email, contact.phone);
 
-  return { id, name: input.name, email: input.email, type: 'customer' };
+  return { id, name, email: contact.email || null, phone: contact.phone, type: 'customer' };
 }

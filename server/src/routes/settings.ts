@@ -31,6 +31,8 @@ const BookingRulesSchema = z.object({
   requirePhone: z.boolean().optional(),
   defaultDurationMinutes: z.number().int().positive().max(1440).optional(),
   defaultBufferMinutes: z.number().int().min(0).max(240).optional(),
+  /** V4: customers may reschedule or cancel online until this many hours before the start (0 = until it starts). */
+  customerChangeCutoffHours: z.number().int().min(0).max(168).optional(),
 }).passthrough();
 
 // Business hours narrow every staff member's bookable hours (services/schedule.ts); {} means none are set.
@@ -61,6 +63,8 @@ const OrgSchema = z.object({
   workingHours: BusinessHoursSchema.optional(),
   bookingRules: BookingRulesSchema.optional(),
   cancellationPolicy: z.string().max(2000).optional(),
+  /** V4: the one appointment location or online instructions shown to customers before they confirm. */
+  appointmentLocation: z.string().trim().max(500).optional(),
 });
 
 function rowToOrg(row: Record<string, unknown>) {
@@ -81,6 +85,7 @@ function rowToOrg(row: Record<string, unknown>) {
     workingHours: JSON.parse(row.working_hours as string ?? '{}'),
     bookingRules: JSON.parse(row.booking_rules as string ?? '{}'),
     cancellationPolicy: row.cancellation_policy ?? '',
+    appointmentLocation: row.appointment_location ?? '',
     createdAt: row.created_at,
   };
 }
@@ -224,7 +229,7 @@ router.put('/', requirePermission('settings:write'), (req: AuthRequest, res, nex
       name: 'name', email: 'email', phone: 'phone', website: 'website',
       address: 'address', city: 'city', country: 'country', timezone: 'timezone',
       currency: 'currency', logo: 'logo', cancellationPolicy: 'cancellation_policy',
-      dateFormat: 'date_format', timeFormat: 'time_format',
+      dateFormat: 'date_format', timeFormat: 'time_format', appointmentLocation: 'appointment_location',
     };
 
     for (const [key, col] of Object.entries(map)) {

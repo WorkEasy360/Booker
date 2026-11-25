@@ -76,23 +76,21 @@ export function localDateISO(d: Date = new Date()): string {
 export function getStatusColor(status: AppointmentStatus | string): string {
   const map: Record<AppointmentStatus, string> = {
     scheduled: 'text-blue-700 bg-blue-50',
-    confirmed: 'text-primary bg-primary-light',
     completed: 'text-emerald-700 bg-emerald-50',
     cancelled: 'text-red-700 bg-red-50',
     no_show: 'text-purple-700 bg-purple-50',
   };
-  return map[status as AppointmentStatus] ?? 'text-gray-700 bg-gray-50';
+  return map[(status === 'confirmed' ? 'scheduled' : status) as AppointmentStatus] ?? 'text-gray-700 bg-gray-50';
 }
 
 export function getStatusDot(status: AppointmentStatus | string): string {
   const map: Record<AppointmentStatus, string> = {
     scheduled: 'bg-blue-500',
-    confirmed: 'bg-primary',
     completed: 'bg-emerald-500',
     cancelled: 'bg-red-500',
     no_show: 'bg-purple-500',
   };
-  return map[status as AppointmentStatus] ?? 'bg-gray-400';
+  return map[(status === 'confirmed' ? 'scheduled' : status) as AppointmentStatus] ?? 'bg-gray-400';
 }
 
 export function generateId(): string {

@@ -131,14 +131,17 @@ describe('invitation delivery', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM users WHERE email = ?').get(inUse)).toEqual({ n: 1 });
   });
 
-  it('does not invite an address that already has an account, an inactive member, or anyone as admin', async () => {
+  it('does not invite an address that already has an account or an inactive member; Owner (admin) invitations are allowed', async () => {
     const owner = await addStaff(A, 'owner', `inviter-a-${RUN}@example.com`);
     expect((await invite(A, owner)).body.code).toBe('EMAIL_IN_USE');
     const inactive = await addStaff(A, 'inactive');
     await request(app).put(`/api/staff/${inactive}`).set(bearer(A.token)).send({ isActive: false }).expect(200);
     expect((await invite(A, inactive)).body.code).toBe('STAFF_INACTIVE');
     const someone = await addStaff(A, 'escalate');
-    expect((await invite(A, someone, 'admin')).status).toBe(400);
+    // V4 Team: login access may be Owner (admin) or Staff.
+    const asOwner = await invite(A, someone, 'admin');
+    expect(asOwner.status).toBe(201);
+    expect(asOwner.body.data.invitation.role).toBe('admin');
   });
 
   it('only administrators can invite, list or revoke invitations', async () => {

@@ -7,6 +7,9 @@
 //   the business has switched off is closed. While a business has saved no hours, staff hours alone apply.
 // - Weekly breaks (schedule_breaks: per staff member, or for the whole business) cannot be booked.
 // - Time off (staff) and closures (whole business, staff_id NULL) block whole days or part of each day.
+// - Date hours (date_hours) give one date different hours: a provider's row replaces their weekly hours that day, a
+//   business row (staff_id NULL) replaces the business's weekly hours that day. The two are still intersected, so a
+//   provider is never bookable outside business hours.
 // Existing appointments are never changed by any of these; they only stop new bookings.
 import db from '../db/init';
 
@@ -44,6 +47,19 @@ export function businessHours(orgId: string): WeekHours | null {
 
 interface TimeOffRow { staff_id: string | null; start_time: string | null; end_time: string | null; reason: string }
 
+/** Different hours on this date: the provider's own row and the business row (either may be missing). */
+function dateHours(orgId: string, staffId: string, date: string): { staff?: DayHours; business?: DayHours } {
+  const rows = db.prepare(
+    'SELECT staff_id, start_time, end_time FROM date_hours WHERE organization_id = ? AND date = ? AND (staff_id = ? OR staff_id IS NULL) ORDER BY created_at'
+  ).all(orgId, date, staffId) as Array<{ staff_id: string | null; start_time: string; end_time: string }>;
+  const out: { staff?: DayHours; business?: DayHours } = {};
+  for (const r of rows) {
+    const hours = { enabled: true, start: r.start_time, end: r.end_time };
+    if (r.staff_id) out.staff = hours; else out.business = hours;
+  }
+  return out;
+}
+
 export function staffDaySchedule(staffId: string, date: string): DaySchedule {
   const staff = db.prepare('SELECT name, organization_id, working_hours FROM staff WHERE id = ?')
     .get(staffId) as { name: string; organization_id: string; working_hours: string | null } | undefined;
@@ -51,12 +67,14 @@ export function staffDaySchedule(staffId: string, date: string): DaySchedule {
   if (!staff) return closed('Staff member not found');
 
   const day = dayName(date);
-  const own = parseHours(staff.working_hours)[day];
+  const special = dateHours(staff.organization_id, staffId, date);
+  const own = special.staff ?? parseHours(staff.working_hours)[day];
   if (!own?.enabled || !own.start || !own.end) return closed(`${staff.name} does not work on ${dayLabel(day)}`);
   let start = toMinutes(own.start), end = toMinutes(own.end);
 
   let narrowedByBusiness = false;
-  const business = businessHours(staff.organization_id);
+  const weekly = businessHours(staff.organization_id);
+  const business = special.business ? { ...(weekly ?? {}), [day]: special.business } : weekly;
   if (business) {
     const biz = business[day];
     if (!biz?.enabled || !biz.start || !biz.end) return closed(`The business is closed on ${dayLabel(day)}`);

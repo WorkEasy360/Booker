@@ -206,7 +206,7 @@ describe('email verification of new sign-ups', () => {
     testOutbox.clear();
     expect((await post('/verify-email/resend', { email: a.email })).body).toEqual(GENERIC);
     const mails = await mailsTo(a.email);
-    expect(mails.map(m => m.subject)).toEqual(['Sign-in help for your WorkeasyBooking account']);
+    expect(mails.map(m => m.subject)).toEqual(['Sign-in help for your WorkEasy360 Booking account']);
     expect(mails[0].text).not.toMatch(/token=/);
   });
 

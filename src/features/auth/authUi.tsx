@@ -4,10 +4,10 @@ import { AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 // Shared pieces of the account-email pages (forgot password, reset password, confirm email), in the style of the
 // sign-in and sign-up pages.
 
-export const INPUT = 'w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BF62] focus:border-transparent transition-colors';
-export const PRIMARY_BUTTON = 'block w-full py-2.5 rounded-lg bg-[#00BF62] hover:bg-[#008F49] text-white text-sm font-semibold text-center transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[#00BF62] focus:ring-offset-2';
-export const SECONDARY_BUTTON = 'block w-full py-2.5 rounded-lg border border-gray-300 text-sm font-medium text-center text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[#00BF62] focus:ring-offset-2';
-export const TEXT_LINK = 'text-[#00BF62] hover:text-[#008F49] font-medium focus:outline-none focus:underline';
+export const INPUT = 'w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#16A34A] focus:border-transparent transition-colors';
+export const PRIMARY_BUTTON = 'block w-full py-2.5 rounded-lg bg-[#16A34A] hover:bg-[#15803D] text-white text-sm font-semibold text-center transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[#16A34A] focus:ring-offset-2';
+export const SECONDARY_BUTTON = 'block w-full py-2.5 rounded-lg border border-gray-300 text-sm font-medium text-center text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[#16A34A] focus:ring-offset-2';
+export const TEXT_LINK = 'text-[#16A34A] hover:text-[#15803D] font-medium focus:outline-none focus:underline';
 
 /**
  * A success or problem message. Problems are announced at once, successes politely. It can take focus, so a page

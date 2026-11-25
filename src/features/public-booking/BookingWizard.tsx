@@ -4,7 +4,7 @@ import { Check, ChevronLeft, ChevronRight, Clock, User } from 'lucide-react';
 import { publicApi } from '@/api/client';
 import { AvailabilityCalendar } from './AvailabilityCalendar';
 import type { EmailStatus } from '@/lib/emailStatus';
-import { formatTime, formatDuration, formatCurrency, cn } from '@/lib/utils';
+import { formatTime, formatDuration, cn } from '@/lib/utils';
 import { Avatar, Spinner } from '@/components/ui';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { businessPageTitle, pageTitle } from '@/lib/brand';
@@ -70,6 +70,8 @@ interface PageData {
   theme?: PageTheme;
   formFields?: PageField[];
   requirePhone?: boolean;
+  /** Single appointment location or online instructions (Settings > Business Details). */
+  location?: string;
   /** Channels the business sends customers messages on; the form asks for consent for each (unticked). */
   messaging?: { sms: boolean; whatsapp: boolean };
 }
@@ -194,12 +196,6 @@ function StepIndicator({ step, variant = 'circles' }: { step: number; variant?: 
 
 function ServiceStep({ services, selected, onSelect }: { services: PageService[]; selected?: PageService; onSelect: (s: PageService) => void }) {
   const { t } = useLanguage();
-  const catColor: Record<string, string> = {
-    consultation: 'bg-blue-50 text-blue-700', treatment: 'bg-amber-50 text-amber-700',
-    class: 'bg-red-50 text-red-700', meeting: 'bg-purple-50 text-purple-700', other: 'bg-muted text-text-muted',
-    workshop: 'bg-green-50 text-green-700', session: 'bg-teal-50 text-teal-700',
-    tour: 'bg-orange-50 text-orange-700', rental: 'bg-indigo-50 text-indigo-700',
-  };
   return (
     <div>
       <h2 className="text-xl font-bold text-text-primary mb-1">{t('service.title')}</h2>
@@ -217,9 +213,6 @@ function ServiceStep({ services, selected, onSelect }: { services: PageService[]
                   <div className="flex items-center gap-2 flex-wrap mb-1">
                     <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: svc.color }} />
                     <span className="font-semibold text-text-primary text-sm">{svc.name}</span>
-                    <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium capitalize', catColor[svc.category] ?? catColor.other)}>
-                      {svc.category}
-                    </span>
                   </div>
                   {svc.description && <p className="text-xs text-text-secondary line-clamp-2">{svc.description}</p>}
                   <div className="flex items-center gap-3 mt-2 text-xs text-text-muted">
@@ -227,7 +220,6 @@ function ServiceStep({ services, selected, onSelect }: { services: PageService[]
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="font-bold text-text-primary text-base">{formatCurrency(svc.price, svc.currency)}</p>
                   {selected?.id === svc.id && <Check className="w-4 h-4 text-primary ml-auto mt-1" />}
                 </div>
               </div>
@@ -428,13 +420,14 @@ function SummaryLine({ label, value, bold }: { label: string; value: string; bol
   );
 }
 
-function DetailsStep({ state, onChange, service, fields, requirePhone, onAnswer, messaging, onConsent }: {
+function DetailsStep({ state, onChange, service, fields, onAnswer, messaging, onConsent, timezone, location }: {
   state: WizardState;
   onChange: (k: 'name' | 'email' | 'phone', v: string) => void;
   service: PageService;
   fields: PageField[];
-  requirePhone: boolean;
   onAnswer: (id: string, v: string) => void;
+  timezone?: string;
+  location?: string;
   messaging: { sms: boolean; whatsapp: boolean };
   onConsent: (channel: 'sms' | 'whatsapp', v: boolean) => void;
 }) {
@@ -445,8 +438,11 @@ function DetailsStep({ state, onChange, service, fields, requirePhone, onAnswer,
   // In Hindi the shared validation messages are replaced by their translations (same rule, same moment).
   const say = (msg: string, key: 'valid.email' | 'valid.phone') => (msg && lang !== 'en' ? t(key, { example: PHONE_PLACEHOLDER }) : msg);
   const nameMsg = touched.name && !ci.name.trim() ? t('info.nameRequired') : '';
-  const emailMsg = touched.email ? (ci.email.trim() ? say(emailError(ci.email), 'valid.email') : t('info.emailRequired')) : '';
-  const phoneMsg = touched.phone ? (ci.phone.trim() ? say(phoneError(ci.phone), 'valid.phone') : requirePhone ? t('info.phoneRequired') : '') : '';
+  const noContact = !ci.email.trim() && !ci.phone.trim();
+  const emailMsg = touched.email && ci.email.trim() ? say(emailError(ci.email), 'valid.email') : '';
+  const phoneMsg = touched.phone
+    ? (ci.phone.trim() ? say(phoneError(ci.phone), 'valid.phone') : noContact && touched.email ? t('info.contactRequired') : '')
+    : '';
   const aria = (id: string, msg: string) => ({ 'aria-invalid': msg ? true : undefined, 'aria-describedby': msg ? `${id}-error` : undefined });
   return (
     <div className="flex flex-col lg:flex-row gap-6">
@@ -459,14 +455,15 @@ function DetailsStep({ state, onChange, service, fields, requirePhone, onAnswer,
           <FieldError id="bw-name-error" message={nameMsg} />
         </div>
         <div>
-          <label htmlFor="bw-email" className="block text-sm font-medium text-text-primary mb-1.5">{t('info.email')} <span className="text-red-500">*</span></label>
+          <p className="text-xs text-text-secondary">{t('info.contactHint')}</p>
+          <label htmlFor="bw-email" className="block text-sm font-medium text-text-primary mb-1.5 mt-2">{t('info.email')}</label>
           <input id="bw-email" type="email" autoComplete="email" value={ci.email} onChange={e => onChange('email', e.target.value)} onBlur={() => leave('email')}
             placeholder="jane@example.com" className={cn(INPUT_CLS, emailMsg && INVALID_CLS)} {...aria('bw-email', emailMsg)} />
           <FieldError id="bw-email-error" message={emailMsg} />
         </div>
         <div>
           <label htmlFor="bw-phone" className="block text-sm font-medium text-text-primary mb-1.5">
-            {t('info.phone')} {requirePhone ? <span className="text-red-500">*</span> : <span className="text-text-muted font-normal">{t('info.optional')}</span>}
+            {t('info.phone')}
           </label>
           <input id="bw-phone" type="tel" autoComplete="tel" value={ci.phone} onChange={e => onChange('phone', e.target.value)} onBlur={() => leave('phone')}
             placeholder={PHONE_PLACEHOLDER} className={cn(INPUT_CLS, phoneMsg && INVALID_CLS)} {...aria('bw-phone', phoneMsg)} />
@@ -525,11 +522,11 @@ function DetailsStep({ state, onChange, service, fields, requirePhone, onAnswer,
           <div className="space-y-2.5 text-sm">
             <SummaryLine label={t('field.service')} value={service.name} />
             <SummaryLine label={t('field.duration')} value={formatDuration(service.duration)} />
-            <SummaryLine label={t('field.price')} value={formatCurrency(service.price, service.currency)} bold />
-            <p className="text-xs text-text-muted">{t('info.payDirectly')}</p>
             {state.selectedStaff && <SummaryLine label={t('field.provider')} value={state.selectedStaff.name} />}
             {state.selectedDate && <SummaryLine label={t('field.date')} value={shortDate(state.selectedDate, lang)} />}
             {state.selectedSlot && <SummaryLine label={t('field.time')} value={state.selectedSlotEnd ? `${formatTime(state.selectedSlot)} – ${formatTime(state.selectedSlotEnd)}` : formatTime(state.selectedSlot)} />}
+            {timezone && <SummaryLine label={t('field.timezone')} value={timezone} />}
+            {location && <SummaryLine label={t('field.location')} value={location} />}
           </div>
         </div>
       </div>
@@ -539,17 +536,18 @@ function DetailsStep({ state, onChange, service, fields, requirePhone, onAnswer,
 
 // ─── Step 6: Review ───────────────────────────────────────────────────────────
 
-function ReviewStep({ state, fields }: { state: WizardState; fields: PageField[] }) {
+function ReviewStep({ state, fields, timezone, location }: { state: WizardState; fields: PageField[]; timezone?: string; location?: string }) {
   const { t, lang } = useLanguage();
   const { selectedService: svc, selectedStaff: staff, selectedDate: date, selectedSlot: slot, customerInfo: ci } = state;
   if (!svc || !ci) return null;
   const rows = [
     { key: 'service', label: t('field.service'), value: svc.name },
     { key: 'duration', label: t('field.duration'), value: formatDuration(svc.duration) },
-    { key: 'price', label: t('field.price'), value: formatCurrency(svc.price, svc.currency) },
     { key: 'provider', label: t('field.provider'), value: staff?.name ?? t('staff.any') },
     { key: 'date', label: t('field.date'), value: date ? longDate(date, lang) : '' },
     { key: 'time', label: t('field.time'), value: slot ? (state.selectedSlotEnd ? `${formatTime(slot)} – ${formatTime(state.selectedSlotEnd)}` : formatTime(slot)) : '' },
+    { key: 'timezone', label: t('field.timezone'), value: timezone ?? '' },
+    { key: 'location', label: t('field.location'), value: location ?? '' },
     { key: 'name', label: t('field.name'), value: ci.name },
     { key: 'email', label: t('field.email'), value: ci.email },
     { key: 'phone', label: t('field.phone'), value: ci.phone },
@@ -564,7 +562,7 @@ function ReviewStep({ state, fields }: { state: WizardState; fields: PageField[]
         {rows.map(row => (
           <div key={row.key} className="flex items-center justify-between px-4 py-3">
             <span className="text-sm text-text-muted">{row.label}</span>
-            <span className={cn('text-sm font-medium text-text-primary max-w-[60%] text-right', row.key === 'price' && 'text-primary font-bold text-base')}>
+            <span className={cn('text-sm font-medium text-text-primary max-w-[60%] text-right', false)}>
               {row.value}
             </span>
           </div>
@@ -624,6 +622,14 @@ export default function BookingWizard() {
   // Reload staff only when the step or the chosen service (by id) changes.
   }, [state.step, state.selectedService?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Only one service: it is chosen automatically and the service step is skipped (V4 3.2).
+  const singleService = pageData?.services.length === 1;
+  useEffect(() => {
+    if (singleService && state.step === 1 && !state.selectedService) {
+      setState(prev => ({ ...prev, selectedService: pageData!.services[0], step: 2 }));
+    }
+  }, [singleService, state.step, state.selectedService, pageData]);
+
   // Auto-skip staff step when only 1 staff member available
   useEffect(() => {
     if (state.step === 2 && !state.staffLoading && state.serviceStaff.length === 1) {
@@ -636,7 +642,6 @@ export default function BookingWizard() {
   }
 
   const fields = pageData?.formFields ?? [];
-  const requirePhone = pageData?.requirePhone !== false;
   const missingAnswer = fields.find(f => f.required && !(state.answers[f.id] ?? '').trim());
   const invalidAnswer = fields.find(f => answerError(f, state.answers[f.id] ?? ''));
 
@@ -654,8 +659,8 @@ export default function BookingWizard() {
     if (s.step === 4) return !!s.selectedSlot;
     if (s.step === 5) {
       const ci = s.customerInfo;
-      return !!(ci?.name.trim() && ci?.email.trim() && !emailError(ci.email) && (!requirePhone || ci?.phone.trim())
-        && !phoneError(ci?.phone ?? '') && !missingAnswer && !invalidAnswer);
+      return !!(ci?.name.trim() && (ci.email.trim() || ci.phone.trim()) && !emailError(ci.email) && !phoneError(ci.phone)
+        && !missingAnswer && !invalidAnswer);
     }
     return true;
   }
@@ -670,9 +675,8 @@ export default function BookingWizard() {
     if (s.step === 5) {
       const ci = s.customerInfo;
       if (!ci?.name.trim()) return t('block.name');
-      if (!ci?.email.trim()) return t('block.email');
+      if (!ci.email.trim() && !ci.phone.trim()) return t('block.contact');
       if (emailError(ci.email)) return t('block.emailInvalid');
-      if (requirePhone && !ci?.phone.trim()) return t('block.phone');
       if (phoneError(ci?.phone ?? '')) return t('block.phoneInvalid');
       if (missingAnswer) return t('block.answer', { label: missingAnswer.label });
       if (invalidAnswer) return t('block.answerInvalid', { label: invalidAnswer.label });
@@ -696,7 +700,7 @@ export default function BookingWizard() {
         startTime: state.selectedSlot,
         customer: {
           name: state.customerInfo.name.trim(),
-          email: state.customerInfo.email.trim(),
+          email: state.customerInfo.email.trim() || undefined,
           phone: state.customerInfo.phone.trim() || undefined,
         },
         notes: '',
@@ -721,6 +725,7 @@ export default function BookingWizard() {
           emailStatus: result.email?.status,
           messages: result.messages,
           timezone: pageData?.timezone,
+          location: pageData?.location,
           customerInfo: state.customerInfo,
           workspace: undefined,
           // The business stays the identity on the confirmation page: its name, colour and "show logo" choice.
@@ -782,13 +787,14 @@ export default function BookingWizard() {
         onChange={updateCI}
         service={s.selectedService}
         fields={fields}
-        requirePhone={requirePhone}
+        timezone={pageData?.timezone}
+        location={pageData?.location}
         onAnswer={(id, v) => setState(prev => ({ ...prev, answers: { ...prev.answers, [id]: v } }))}
         messaging={pageData?.messaging ?? { sms: false, whatsapp: false }}
         onConsent={(ch, v) => setState(prev => ({ ...prev, consent: { ...prev.consent, [ch]: v } }))}
       />
     );
-    if (s.step === 6) return <ReviewStep state={s} fields={fields} />;
+    if (s.step === 6) return <ReviewStep state={s} fields={fields} timezone={pageData?.timezone} location={pageData?.location} />;
     return null;
   }
 
@@ -857,7 +863,7 @@ export default function BookingWizard() {
       {/* Navigation */}
       <div className="flex items-center justify-between gap-4">
         <button
-          onClick={() => state.step > 1 ? setState(prev => ({ ...prev, step: prev.step - 1 })) : navigate('/book')}
+          onClick={() => state.step > (singleService ? 2 : 1) ? setState(prev => ({ ...prev, step: prev.step - 1 })) : navigate('/book')}
           className={cn('flex items-center gap-1.5 px-4 py-2.5 border border-border text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-muted transition-colors', layout.button)}
         >
           <ChevronLeft className="w-4 h-4" aria-hidden="true" /> {t('nav.back')}

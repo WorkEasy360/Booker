@@ -26,6 +26,8 @@ export interface RouterEntities {
   destination?: string;
   routePath?: string;
   routeTitle?: string;
+  /** Said before opening a page that replaces a screen of earlier versions (Dashboard, Reports…). */
+  routeNote?: string;
   recordType?: 'customers' | 'services' | 'staff' | 'appointments';
   searchQuery?: string;
   listMode?: boolean;     // true when user wants a listing, not just a count
@@ -40,33 +42,40 @@ export interface IntentResult {
 
 // ── Domain scope ──────────────────────────────────────────────────────────────
 
+// Matched anywhere in the question (substrings of longer words count, so keep these specific).
 const DOMAIN_TERMS = new Set([
-  'appointment', 'booking', 'schedule', 'slot', 'availability', 'reschedule', 'cancel',
-  'service', 'treatment', 'offering', 'session',
+  'appointment', 'booking', 'schedule', 'slot', 'availability', 'reschedule', 'cancel', 'no-show', 'no show',
+  'service', 'treatment', 'offering', 'session', 'duration',
   // Staff / people
   'staff', 'employee', 'team member', 'provider',
   'member', 'team', 'colleague', 'coworker', 'teammate',
-  'onboard', 'invite', 'hire',
+  'onboard', 'invite', 'invitation', 'hire',
   'customer', 'client', 'patient',
   'workspace', 'location', 'branch', 'clinic',
   'resource', 'room', 'equipment',
-  'dashboard', 'report', 'analytics', 'revenue', 'metrics',
+  'dashboard', 'my space', 'report', 'analytics', 'revenue', 'metrics',
   'calendar', 'timetable', 'agenda',
-  'setting', 'configuration', 'preferences', 'password', 'security',
-  'notification', 'reminder',
-  'booking page', 'integration', 'workeasy', 'workeasy360',
-  'invoice', 'billing', 'timezone', 'currency',
+  'setting', 'configuration', 'preferences', 'password', 'security', 'two-factor', 'recovery code', 'authenticator',
+  'notification', 'reminder', 'automation',
+  'booking page', 'booking link', 'integration', 'webhook', 'zapier', 'pabbly', 'google sheets', 'workeasy connect',
+  'workeasy', 'workeasy360',
+  'invoice', 'billing', 'subscription', 'wallet', 'helpdesk', 'timezone', 'currency',
   // Hours and schedule exceptions
-  'working hours', 'opening hours', 'business hours', 'time off', 'holiday', 'closure', 'time zone',
-  'minimum notice', 'manager', 'admin', 'role', 'permission',
+  'hours', 'time off', 'day off', 'holiday', 'closure', 'time zone',
+  'date exception', 'special hours', 'lunch break', 'cutoff', 'cut-off',
+  'minimum notice', 'manager', 'admin', 'owner', 'role', 'permission',
   // Features people ask about that are not built (answered honestly from the knowledge base, not "out of scope")
   'payment', 'pay online', 'stripe', 'paypal', 'razorpay', 'zoom', 'google meet', 'outlook', 'sms', 'whatsapp', 'email',
   // Account / auth
-  'account', 'login', 'logout', 'sign in', 'sign out', 'deactivate',
+  'account', 'login', 'logout', 'log in', 'log out', 'sign in', 'sign out', 'signing', 'sign up', 'deactivate',
+  'get started', 'getting started', 'first steps',
   // Hindi / Hinglish
   'अपॉइंटमेंट', 'बुकिंग', 'सेवा', 'स्टाफ', 'ग्राहक', 'सेटिंग', 'रिपोर्ट',
   'kaise', 'banate', 'jodna', 'karein',
 ]);
+
+// Short words that are part of the product only as whole words ("plan" is not "explain", "break" is not "breakfast").
+const DOMAIN_WORDS = /\b(plans?|links?|breaks?|lunch|block(?:ed|ing)?|unblock|support|tickets?|profile|language|hindi|exceptions?|assistant|ai|api|connectors?|apps?|mobile)\b/i;
 
 // Single-word terms worth fuzzy-checking for common typos
 const FUZZY_DOMAIN_WORDS = [
@@ -101,6 +110,8 @@ export function normalizeTypos(query: string): string {
     const w = word.toLowerCase().replace(/[^a-z]/g, '');
     if (w.length < 5) return word;
     for (const fw of FUZZY_DOMAIN_WORDS) {
+      // A plural is not a typo: "reports" stays "reports", as the articles spell it.
+      if (w === fw || w === `${fw}s` || w === `${fw}es`) return word;
       if (Math.abs(w.length - fw.length) > 1) continue;
       if (levenshtein(w, fw) <= 1) return fw;
     }
@@ -113,6 +124,7 @@ function hasDomainTerm(lower: string): boolean {
   for (const term of DOMAIN_TERMS) {
     if (lower.includes(term)) return true;
   }
+  if (DOMAIN_WORDS.test(lower)) return true;
   // Fuzzy match: allow edit distance 1 for words ≥5 chars, distance 2 for ≥8 chars
   const words = lower.split(/\s+/);
   for (const word of words) {
@@ -126,93 +138,144 @@ function hasDomainTerm(lower: string): boolean {
   return false;
 }
 
-// ── Navigation route registry (verified from src/app/router.tsx) ──────────────
+// ── Navigation route registry (verified from src/app/router.tsx, V4) ──────────
+// Screens of earlier versions (Dashboard, My Space, Reports, the Calendar menu, Booking Pages, Workspaces,
+// Resources) open the V4 screen that replaces them, with a note saying so.
 
-const ROUTE_REGISTRY: Array<{ keys: string[]; route: string; title: string }> = [
-  { keys: ['new appointment', 'add appointment', 'create appointment', 'appointments/new'], route: '/appointments/new', title: 'New Appointment' },
-  { keys: ['new service', 'add service', 'create service', 'services/new'],                route: '/services/new',     title: 'New Service' },
-  { keys: ['new staff', 'add staff', 'staff/new', 'new member', 'add member', 'add team member', 'new team member', 'invite staff', 'invite member', 'invite team', 'onboard staff', 'onboard member'], route: '/staff/new', title: 'New Staff' },
-  { keys: ['new customer', 'add customer', 'customers/new'],                               route: '/customers/new',    title: 'New Customer' },
-  { keys: ['dashboard', 'home page', 'overview page', 'main page'],                        route: '/dashboard',        title: 'Dashboard' },
-  { keys: ['appointments', 'my appointments', 'appointment list'],                         route: '/appointments',     title: 'Appointments' },
-  { keys: ['calendar', 'schedule view'],                                                   route: '/calendar',         title: 'Calendar' },
-  { keys: ['services', 'service list'],                                                    route: '/services',         title: 'Services' },
-  { keys: ['staff', 'team', 'staff list', 'my team', 'manage staff', 'manage team', 'team members', 'staff members'], route: '/staff', title: 'Staff' },
-  { keys: ['customers', 'customer list', 'clients'],                                       route: '/customers',        title: 'Customers' },
-  { keys: ['workspaces', 'workspace list'],                                                route: '/workspaces',       title: 'Workspaces' },
-  { keys: ['resources', 'resource list'],                                                  route: '/resources',        title: 'Resources' },
-  { keys: ['reports', 'analytics', 'report page', 'reports page'],                        route: '/reports',          title: 'Reports' },
-  { keys: ['settings', 'configuration', 'preferences', 'settings page'],                  route: '/settings',         title: 'Settings' },
-  { keys: ['booking pages', 'booking-pages', 'booking page list'],                        route: '/booking-pages',    title: 'Booking Pages' },
-  { keys: ['notifications'],                                                               route: '/notifications',    title: 'Notifications' },
-  { keys: ['integrations', 'integration'],                                                 route: '/integrations',     title: 'Integrations' },
-  { keys: ['my space', 'my-space'],                                                        route: '/my-space',         title: 'My Space' },
+interface Destination { route: string; title: string; note?: string }
+
+const ROUTE_REGISTRY: Array<{ keys: string[] } & Destination> = [
+  { keys: ['new appointment', 'add appointment', 'create appointment', 'book appointment', 'new booking', 'appointments/new'], route: '/appointments/new', title: 'New Appointment' },
+  { keys: ['new customer', 'add customer', 'create customer', 'new client', 'add client', 'customers/new'], route: '/customers/new', title: 'Add Customer' },
+  { keys: ['appointments', 'my appointments', 'appointment list', 'bookings', 'booking list', 'home page', 'main page'], route: '/appointments', title: 'Appointments' },
+  { keys: ['calendar', 'calendar view', 'schedule view', 'week view', 'day view'], route: '/appointments?view=calendar', title: 'Calendar' },
+  { keys: ['availability', 'working hours', 'business hours', 'opening hours', 'staff hours', 'my hours', 'holidays', 'holiday',
+    'time off', 'date exceptions', 'blocked dates', 'breaks'], route: '/availability', title: 'Availability' },
+  { keys: ['customers', 'customer list', 'clients'], route: '/customers', title: 'Customers' },
+  { keys: ['settings', 'configuration', 'preferences', 'settings page'], route: '/settings', title: 'Settings' },
+  { keys: ['business details', 'business settings', 'business profile', 'business name', 'timezone', 'time zone'],
+    route: '/settings/business', title: 'Settings → Business Details' },
+  { keys: ['services', 'service list', 'service settings', 'new service', 'add service', 'create service', 'services/new'],
+    route: '/settings/services', title: 'Settings → Services' },
+  { keys: ['notifications', 'notification settings', 'reminders', 'reminder settings', 'sms settings', 'whatsapp settings'],
+    route: '/settings/notifications', title: 'Settings → Notifications' },
+  { keys: ['public booking', 'booking link', 'booking settings', 'online booking', 'booking page', 'booking pages', 'booking-pages'],
+    route: '/settings/public-booking', title: 'Settings → Public Booking' },
+  { keys: ['staff', 'team', 'staff list', 'my team', 'manage staff', 'manage team', 'team members', 'staff members', 'employees',
+    'team settings', 'staff settings',
+    'new staff', 'add staff', 'staff/new', 'new member', 'add member', 'add team member', 'new team member', 'invite staff',
+    'invite member', 'invite team', 'onboard staff', 'onboard member'], route: '/settings/team', title: 'Settings → Team' },
+  { keys: ['automation', 'internal automation'], route: '/settings/automation', title: 'Settings → Internal Automation' },
+  { keys: ['integrations', 'integration', 'webhooks', 'webhook', 'google calendar', 'workeasy connect'],
+    route: '/settings/integrations', title: 'Settings → Integrations' },
+  { keys: ['my account', 'account', 'account settings', 'profile', 'password', 'two-factor', '2fa', 'security', 'language',
+    'active sessions', 'plan and billing', 'wallets'], route: '/account', title: 'My Account' },
+  // Earlier screens → the V4 screen that replaces them.
+  { keys: ['dashboard', 'overview page'], route: '/appointments', title: 'Appointments',
+    note: 'There is no Dashboard in WorkEasy360 Booking: today\'s figures are at the top of Appointments.' },
+  { keys: ['my space', 'my-space'], route: '/appointments', title: 'Appointments',
+    note: 'My Space is not part of WorkEasy360 Booking: your appointments are in Appointments.' },
+  { keys: ['reports', 'report page', 'reports page', 'report', 'analytics'], route: '/appointments', title: 'Appointments',
+    note: 'Reports are not available in WorkEasy360 Booking. Appointments shows today\'s appointments, upcoming ones, this week\'s completed and cancelled appointments and your total customers.' },
+  { keys: ['workspaces', 'workspace list', 'workspace'], route: '/settings/business', title: 'Settings → Business Details',
+    note: 'Workspaces are not available in WorkEasy360 Booking: a business has one timezone and one appointment location, set in Business Details.' },
+  { keys: ['resources', 'resource list', 'rooms', 'equipment'], route: '/settings/team', title: 'Settings → Team',
+    note: 'Resources such as rooms or equipment are not available in WorkEasy360 Booking: only team members are booked.' },
 ];
 
-function resolveDestination(lower: string): { route: string; title: string } | undefined {
+function resolveDestination(lower: string): Destination | undefined {
   // Match longest-key first to prefer "new appointment" over "appointment"
-  const flat = ROUTE_REGISTRY.flatMap(r => r.keys.map(k => ({ key: k, route: r.route, title: r.title })))
+  const flat = ROUTE_REGISTRY.flatMap(({ keys, ...dest }) => keys.map(key => ({ key, dest })))
     .sort((a, b) => b.key.length - a.key.length);
-  for (const { key, route, title } of flat) {
-    if (lower.includes(key)) return { route, title };
+  for (const { key, dest } of flat) {
+    if (lower.includes(key)) return dest;
   }
   return undefined;
 }
 
 // ── Feature → BM25 category map ───────────────────────────────────────────────
 
+// Categories of the V4 knowledge articles (knowledge-indexer.ts). Features of earlier versions that are gone
+// (reports, workspaces, resources, payments) are answered from the Known Limitations article.
 const FEATURE_CATEGORY_MAP: Record<string, string[]> = {
+  integration:   ['integrations'],
+  video:         ['limitations', 'integrations'],
+  payment:       ['limitations', 'faq'],
+  availability:  ['availability'],
   staff:         ['staff'],
   appointment:   ['appointments'],
   service:       ['services'],
   customer:      ['customers'],
-  workspace:     ['workspaces'],
-  resource:      ['resources'],
-  booking:       ['booking-pages', 'public-booking'],
+  booking:       ['public-booking'],
   settings:      ['settings'],
-  report:        ['reports'],
-  calendar:      ['calendar'],
+  account:       ['account'],
+  signin:        ['getting-started', 'account'],
   notification:  ['notifications'],
-  integration:   ['integrations'],
+  automation:    ['automation', 'notifications'],
+  report:        ['limitations'],
+  data:          ['limitations', 'customers'],
+  workspace:     ['limitations'],
+  resource:      ['limitations'],
+  dashboard:     ['overview', 'faq'],
+  permissions:   ['permissions'],
+  ai:            ['ai'],
   overview:      ['overview', 'getting-started'],
   troubleshoot:  ['troubleshooting', 'faq'],
-  permissions:   ['permissions'],
 };
 
 interface FeatureMatch { feature: string; pattern: RegExp }
 
-// Order matters: more specific patterns first; integration before calendar
+// Order matters for the primary feature (the first match): more specific patterns first; integration before
+// calendar. Every matching feature adds its categories.
 const FEATURE_MATCHERS: FeatureMatch[] = [
-  { feature: 'integration', pattern: /\b(integrations?|google\s+calendar|apple\s+calendar|outlook|ical|google\s+sync|connect.*calendar|sync.*calendar)\b/i },
-  { feature: 'staff',        pattern: /\b(staff\s+member|staff|employee|team\s+member|my\s+team|member|colleague|coworker|teammate|onboard|invite|provider|therapist|doctor)\b/i },
-  { feature: 'appointment',  pattern: /\b(appointment|booking|meeting|session)\b/i },
-  { feature: 'service',      pattern: /\b(service|treatment|offering)\b/i },
-  { feature: 'customer',     pattern: /\b(customer|client|patient)\b/i },
-  { feature: 'workspace',    pattern: /\b(workspace|location|branch|clinic|office)\b/i },
-  { feature: 'resource',     pattern: /\b(resource|room|equipment)\b/i },
-  { feature: 'booking',      pattern: /\b(booking\s+page|public\s+booking)\b/i },
-  { feature: 'settings',     pattern: /\b(setting|configuration|preferences|password|security|2fa|account|booking\s+rules?|business\s+hours|opening\s+hours|time\s*zone|currency|cancellation\s+policy|minimum\s+notice)\b/i },
-  { feature: 'report',       pattern: /\b(reports?|analytics|revenue|metrics|statistics)\b/i },
-  { feature: 'calendar',     pattern: /\b(calendar|schedule\s+view|agenda)\b/i },
-  { feature: 'notification', pattern: /\b(notifications?|reminders?|email\s+(?:alert|reminder|notification))\b/i },
-  { feature: 'permissions',  pattern: /\b(roles?|permissions?|managers?|admins?|administrators?)\b|\bcan\s+(?:a\s+)?(?:staff|managers?|admins?)\b/i },
+  { feature: 'integration',  pattern: /\b(integrations?|webhooks?|api|zapier|pabbly|google\s+(?:calendar|sheets?)|apple\s+calendar|outlook|ical|google\s+sync|workeasy\s+connect|connectors?|connect.*calendar|sync.*calendar)\b/i },
+  { feature: 'video',        pattern: /\b(zoom|google\s+meet|video(?:\s+(?:calls?|meetings?|links?))?|teams\s+meetings?)\b/i },
+  { feature: 'payment',      pattern: /\b(payments?|pay|paid|paying|stripe|paypal|razorpay|prices?|pricing|deposits?|invoices?|currency)\b/i },
+  { feature: 'availability', pattern: /\b(availability|working\s+hours?|opening\s+hours?|business\s+hours?|staff\s+hours?|my\s+hours|holidays?|closures?|close\s+(?:the\s+)?business|time\s+off|days?\s+off|leave|vacation|sick|breaks?|lunch|date\s+exceptions?|exceptions?|block(?:ed)?|special\s+hours)\b/i },
+  { feature: 'staff',        pattern: /\b(staff\s+member|staff|employees?|team\s+members?|my\s+team|team|members?|colleagues?|coworkers?|teammates?|onboard|invite|invitations?|providers?|therapists?|doctors?)\b/i },
+  { feature: 'appointment',  pattern: /\b(appointments?|bookings?|book|meetings?|sessions?|reschedul\w*|no[-\s]?shows?|(?<!google\s)(?<!apple\s)calendar|cancel\w*)\b/i },
+  { feature: 'service',      pattern: /\b(services?|treatments?|offerings?|duration)\b/i },
+  { feature: 'customer',     pattern: /\b(customers?|clients?|patients?)\b/i },
+  { feature: 'booking',      pattern: /\b(booking\s+(?:page|link|form|url|settings|reference|ref|code)s?|public\s+booking|online\s+booking|book\s+online|accept\s+(?:online\s+)?bookings|cut-?off|manage[-\s]booking|self[-\s]service|customers?\s+(?:can\s+|to\s+)?(?:cancel|reschedule|change|manage|move)\w*|how\s+far\s+ahead|in\s+advance|advance\s+booking|booking\s+window)\b/i },
+  { feature: 'data',         pattern: /\b(import(?:ing)?|export(?:ing)?|spreadsheets?|csv|excel|bulk|backup)\b/i },
+  { feature: 'settings',     pattern: /\b(settings?|configuration|preferences|business\s+(?:details|name|profile|settings)|time\s*zones?|location|address)\b/i },
+  { feature: 'overview',     pattern: /\b(workeasy\s?360(?:\s+booking)?|what\s+(?:is|does)\s+(?:this|the)\s+(?:app|product|software)|get(?:ting)?\s+started|first\s+steps?|set\s?up\s+(?:my\s+)?(?:account|business)|main\s+menus?|four\s+menus)\b/i },
+  { feature: 'signin',       pattern: /\b(sign(?:ing)?[-\s]?(?:in|out|up)|log(?:ging)?[-\s]?(?:in|out)|login|logout|forgot(?:ten)?|reset\s+(?:my\s+|the\s+)?password|create\s+(?:an?\s+)?(?:booking\s+)?account|register|remember\s+me)\b/i },
+  { feature: 'account',      pattern: /\b(password|security|2fa|two[-\s]?factor|recovery\s+codes?|authenticator|account|profile|my\s+(?:email|name)|language|hindi|active\s+sessions|plans?|billing|subscription|wallets?|helpdesk|support|tickets?)\b/i },
+  { feature: 'notification', pattern: /\b(notifications?|reminders?|email\s+(?:alert|reminder|notification)s?|sms|whatsapp|text\s+messages?|channels?|(?:booking|confirmation)\s+emails?)\b/i },
+  { feature: 'automation',   pattern: /\b(automation|automatic(?:ally)?|automated|rules?|workflow\s+builder)\b/i },
+  { feature: 'report',       pattern: /\b(reports?|analytics|revenue|metrics|statistics|charts?)\b/i },
+  { feature: 'workspace',    pattern: /\b(workspaces?|branch(?:es)?|(?:multiple|several|other|second)\s+locations?|franchise)\b/i },
+  { feature: 'resource',     pattern: /\b(resources?|rooms?|equipment)\b/i },
+  { feature: 'dashboard',    pattern: /\b(dashboard|my\s+space)\b/i },
+  { feature: 'permissions',  pattern: /\b(roles?|permissions?|managers?|admins?|administrators?|owners?)\b|\bcan\s+(?:a\s+)?(?:staff|managers?|admins?|owners?)\b/i },
+  { feature: 'ai',           pattern: /\b(ai|assistant|chat\s?bot|agent)\b/i },
+  { feature: 'troubleshoot', pattern: /\b(why|not\s+working|errors?|problems?|issues?|greyed|grayed|disabled|not\s+(?:showing|shown|available|sent|arriving|received|getting)|did\s*n[o']t|does\s*n[o']t|can't|cannot|unable)\b/i },
 ];
 
+// A specific feature makes the general one it mentions irrelevant: "staff working hours" and "time off for a staff
+// member" are answered in Availability, "booking link" and "customers cancel their booking" in Public Booking,
+// "what can a staff member do" in Roles and Permissions, "can customers pay online" in Known Limitations.
+const OVERRIDES: Record<string, string[]> = {
+  availability: ['staff'],
+  booking:      ['appointment', 'customer'],
+  notification: ['appointment'],
+  payment:      ['appointment', 'customer'],
+  report:       ['appointment', 'customer'],
+  video:        ['appointment'],
+  permissions:  ['staff'],
+  data:         ['customer'],
+};
+
 /** Returns ALL matched features so BM25 can search across multiple topic categories. */
-function detectAllFeatures(query: string): { primaryFeature: string | undefined; categories: string[] } {
-  const seenFeatures: string[] = [];
-  const categories: string[] = [];
-  for (const { feature, pattern } of FEATURE_MATCHERS) {
-    if (pattern.test(query)) {
-      if (!seenFeatures.includes(feature)) {
-        seenFeatures.push(feature);
-        for (const cat of FEATURE_CATEGORY_MAP[feature] ?? []) {
-          if (!categories.includes(cat)) categories.push(cat);
-        }
-      }
-    }
-  }
-  return { primaryFeature: seenFeatures[0], categories };
+function detectAllFeatures(query: string): { primaryFeature: string | undefined; features: string[]; categories: string[] } {
+  // The product's own name is not a question about bookings.
+  const text = query.replace(/\bworkeasy\s?360\s+booking\b/gi, 'WorkEasy360');
+  const matched = FEATURE_MATCHERS.filter(({ pattern }) => pattern.test(text)).map(m => m.feature);
+  const overridden = new Set(matched.flatMap(f => OVERRIDES[f] ?? []));
+  const features = [...new Set(matched.filter(f => !overridden.has(f)))];
+  const categories = [...new Set(features.flatMap(f => FEATURE_CATEGORY_MAP[f] ?? []))];
+  return { primaryFeature: features[0], features, categories };
 }
 
 // ── Entity extraction ─────────────────────────────────────────────────────────
@@ -389,7 +452,10 @@ export function routeIntent(query: string): IntentResult {
     };
   }
 
-  const { primaryFeature, categories: featureCategories } = detectAllFeatures(query);
+  const { primaryFeature, features, categories: detected } = detectAllFeatures(query);
+  const featureCategories = detected.length && /^\s*(?:can|could|do|does|is|are|will|should|may)\b/i.test(query)
+    ? [...new Set([...detected, 'faq', 'limitations'])]
+    : detected;
   const entities: RouterEntities = {};
   if (primaryFeature) entities.feature = primaryFeature;
 
@@ -400,7 +466,10 @@ export function routeIntent(query: string): IntentResult {
       return {
         intent: 'navigation',
         confidence: 0.95,
-        entities: { ...entities, destination: dest.route, routePath: dest.route, routeTitle: dest.title },
+        entities: {
+          ...entities, destination: dest.route, routePath: dest.route, routeTitle: dest.title,
+          ...(dest.note ? { routeNote: dest.note } : {}),
+        },
         featureCategories: [],
       };
     }
@@ -442,7 +511,7 @@ export function routeIntent(query: string): IntentResult {
       intent: 'live_data_query',
       confidence: 0.9,
       entities: { ...entities, timeframe, date, listMode },
-      featureCategories: [],
+      featureCategories,
     };
   }
 
@@ -453,16 +522,16 @@ export function routeIntent(query: string): IntentResult {
       intent: 'availability_query',
       confidence: 0.9,
       entities: { ...entities, date },
-      featureCategories: [],
+      featureCategories,
     };
   }
 
   // 7. Action request — imperative verb + specific entity data
   //    Must NOT be a "how do I" question; only applies to bookable/creatable entities
-  const ACTIONABLE_FEATURES = new Set(['service', 'appointment', 'customer', 'staff', 'workspace', 'resource']);
+  const ACTIONABLE_FEATURES = new Set(['service', 'appointment', 'customer', 'staff']);
   const isHowTo = HOW_TO_PATTERNS.some(p => p.test(query));
   if (!isHowTo && IMPERATIVE_PATTERNS.some(p => p.test(query)) &&
-      (!primaryFeature || ACTIONABLE_FEATURES.has(primaryFeature))) {
+      (!primaryFeature || ACTIONABLE_FEATURES.has(primaryFeature) || features.includes('service'))) {
     const duration = extractDuration(query);
     const priceInfo = extractPrice(query);
     const serviceName = extractServiceName(query) ?? primaryFeature;

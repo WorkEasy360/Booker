@@ -1,4 +1,4 @@
-export type AppointmentStatus = 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show';
+export type AppointmentStatus = 'scheduled' | 'completed' | 'cancelled' | 'no_show';
 export type ServiceCategory = 'consultation' | 'class' | 'workshop' | 'session' | 'tour' | 'rental' | 'other';
 export type ResourceType = 'room' | 'equipment' | 'vehicle' | 'table' | 'other';
 export type StaffRole = 'admin' | 'manager' | 'staff';

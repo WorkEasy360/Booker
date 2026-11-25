@@ -9,7 +9,7 @@ import { staffBookingProblem } from '../services/bookability';
 import { DateString, TimeString, isRealDate } from '../validation';
 import {
   verifyManageToken, issueManageToken, emailLinkExpiry, publicBookingView, sameEmail, loadManagedAppointment,
-  LOOKUP_TOKEN_TTL_MS, type TokenCheck,
+  LOOKUP_TOKEN_TTL_MS, customerContact, cutoffPassed, changeCutoffHours, type TokenCheck, type ManagedAppointment,
 } from '../services/booking-access';
 import { RULES, clientKey, consume, rateLimit, sendRateLimited } from '../middleware/rate-limit';
 import { appointmentState, recordChanges, recordCreated } from '../services/appointment-history';
@@ -20,6 +20,8 @@ import { getPreferences } from '../services/email/preferences';
 import { connectionUsable, consentFor, recordConsent, ruleEnabled } from '../services/notifications/settings';
 import { appointmentIcs } from '../services/notifications/ics';
 import { EVENTS } from '../services/notifications/types';
+import { businessLocation, appointmentLocation } from '../services/default-booking-page';
+import { normalizeStatus } from '../services/appointment-status';
 
 const router = Router();
 
@@ -169,6 +171,8 @@ router.get('/pages/:slug', (req, res, next) => {
         logoUrl: uploadedLogoUrl(row.organization_id as string)
           ?? (typeof row.org_logo === 'string' && row.org_logo.startsWith('https://') ? row.org_logo : null),
         timezone: row.org_timezone,
+        // V4: the one appointment location or online instructions, shown before the customer confirms.
+        location: businessLocation(row.organization_id as string),
         // The business's booking language: the page starts in it unless the visitor chose a language before.
         language: getPreferences(row.organization_id as string).bookingLanguage,
         theme: JSON.parse(row.theme as string ?? '{}'),
@@ -329,9 +333,11 @@ const BookingSchema = z.object({
       .max(100, 'Name must be 100 characters or fewer')
       .refine(s => s.trim().length > 0, 'Name cannot be all whitespace')
       .refine(s => !/[<>]/.test(s), 'Name must not contain HTML characters'),
-    email: z.string().trim().toLowerCase().email('Enter a valid email address').max(254),
+    // V4: a phone number or an email address (or both).
+    email: z.preprocess(v => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+      z.string().trim().toLowerCase().email('Enter a valid email address').max(254).optional()),
     phone: phoneField().optional(),
-  }),
+  }).refine(c => !!c.email || !!c.phone, { message: 'Enter a phone number or an email address', path: ['phone'] }),
   notes: z.string().max(2000).optional(),
   /** The customer's own choice on the booking form; absent when the form did not ask. */
   consent: z.object({ sms: z.boolean().optional(), whatsapp: z.boolean().optional() }).strict().optional(),
@@ -355,6 +361,31 @@ const bookLimit = rateLimit(req => {
     { rule: RULES.bookEmail, key: typeof email === 'string' ? email.trim().toLowerCase().slice(0, 254) : null },
   ];
 });
+
+/**
+ * The existing customer a public booking belongs to, or null for a new one. A match by email wins; a phone number
+ * matches only a customer without an email address (so one person's phone cannot attach a booking to another's record),
+ * and only when exactly one such customer has it.
+ */
+function matchPublicCustomer(orgId: string, email: string | undefined, phone: string | undefined): string | null {
+  if (email) {
+    return (db.prepare('SELECT id FROM customers WHERE organization_id = ? AND email = ?').pluck().get(orgId, email.toLowerCase()) as string | undefined) ?? null;
+  }
+  if (!phone) return null;
+  const ids = db.prepare("SELECT id FROM customers WHERE organization_id = ? AND phone = ? AND email = '' LIMIT 2").pluck().all(orgId, phone) as string[];
+  return ids.length === 1 ? ids[0] : null;
+}
+
+/** The booked customer's email ('' when none). */
+function bookedEmail(appointmentId: string): string {
+  return (db.prepare('SELECT c.email FROM appointments a JOIN customers c ON c.id = a.customer_id WHERE a.id = ?').pluck().get(appointmentId) as string | undefined) ?? '';
+}
+/** The contact a new booking's manage token is bound to (services/booking-access.ts customerContact). */
+function bookedContact(appointmentId: string): string {
+  const row = db.prepare('SELECT c.email, c.phone FROM appointments a JOIN customers c ON c.id = a.customer_id WHERE a.id = ?')
+    .get(appointmentId) as { email: string; phone: string | null } | undefined;
+  return customerContact(row?.email, row?.phone);
+}
 
 // Create a booking (public — no auth)
 router.post('/book', bookLimit, async (req, res, next) => {
@@ -475,18 +506,16 @@ router.post('/book', bookLimit, async (req, res, next) => {
       const resources = chooseResources({ orgId, serviceId: data.serviceId, date: data.date, startTime: data.startTime, endTime });
       if ('error' in resources) return { problem: resources.error };
 
-      // Upsert customer (email is the dedup key within the org)
-      const existingCust = db
-        .prepare('SELECT id FROM customers WHERE organization_id = ? AND email = ?')
-        .get(orgId, data.customer.email.toLowerCase()) as { id: string } | undefined;
-      const customerId = existingCust ? existingCust.id : newCustomerId;
-
-      if (!existingCust) {
+      // The customer record: an existing one when the contact details match it unambiguously (email first; a phone
+      // number only for customers without an email), otherwise a new one. Existing records are never changed from the
+      // public form, and the answer is the same either way, so nothing reveals whether someone is already a customer.
+      const customerId = matchPublicCustomer(orgId, data.customer.email, data.customer.phone) ?? newCustomerId;
+      if (customerId === newCustomerId) {
         db.prepare(
           `INSERT INTO customers (id, organization_id, name, email, phone, tags)
            VALUES (?, ?, ?, ?, ?, ?)`
         ).run(customerId, orgId, data.customer.name.trim(),
-              data.customer.email.toLowerCase(),
+              data.customer.email ?? '',
               data.customer.phone || null, '[]');
       }
       // Consent before the booking is recorded, so its notifications are planned with the customer's latest choice.
@@ -507,7 +536,7 @@ router.post('/book', bookLimit, async (req, res, next) => {
         '[]', 'scheduled',
         data.date, data.startTime, endTime, svc.duration,
         getOrgTimezone(orgId),
-        svc.price, svc.currency, svc.location,
+        svc.price, svc.currency, appointmentLocation(orgId, svc.location as string | null),
         data.notes ?? '', '',
         JSON.stringify(storedAnswers),
       );
@@ -543,7 +572,9 @@ router.post('/book', bookLimit, async (req, res, next) => {
         staffName: (db.prepare('SELECT name FROM staff WHERE id = ?').get(data.staffId) as { name: string }).name,
         duration: svc.duration,
         // Lets the person who just booked open "manage booking" without looking it up again.
-        manageToken: issueManageToken(result.appointmentId, data.customer.email, emailLinkExpiry(data.date)),
+        manageToken: issueManageToken(result.appointmentId, bookedContact(result.appointmentId), emailLinkExpiry(data.date)),
+        // V4: without an email address no booking emails can be sent; the confirmation page says so.
+        emailUpdates: !!bookedEmail(result.appointmentId),
       },
     });
   } catch (err) { next(err); }
@@ -584,7 +615,7 @@ router.post('/appointments/lookup', lookupLimit, (req, res, next) => {
     const expiresAt = Date.now() + LOOKUP_TOKEN_TTL_MS;
     res.json({
       data: {
-        token: issueManageToken(row.id, row.email, expiresAt),
+        token: issueManageToken(row.id, customerContact(appointment.customer_email, appointment.customer_phone), expiresAt),
         expiresAt: new Date(expiresAt).toISOString(),
         appointment: publicBookingView(appointment),
       },
@@ -651,6 +682,7 @@ const manageLimit = rateLimit(req => [{ rule: RULES.manageIp, key: clientKey(req
  * on record instead of being moved or cancelled afterwards.
  */
 function customerChangeProblem(a: { status: string; date: string; start_time: string; timezone: string }, change: 'cancelled' | 'rescheduled'): string | null {
+  a = { ...a, status: normalizeStatus(a.status) };
   if (a.status === 'cancelled') return change === 'cancelled' ? 'Booking is already cancelled' : 'Cancelled bookings cannot be rescheduled';
   if (a.status === 'completed') return `Completed bookings cannot be ${change}`;
   if (a.status === 'no_show') return `This booking was marked as missed, so it can no longer be ${change}. Please make a new booking or contact the business.`;
@@ -669,12 +701,30 @@ function authorizeChange(req: import('express').Request, res: import('express').
   return check.appointment;
 }
 
+/**
+ * V4: after the business cutoff the customer cannot change the booking online; they get the business contact details
+ * instead. Sends the response itself and returns true when the cutoff has passed.
+ */
+function refuseAfterCutoff(res: import('express').Response, a: ManagedAppointment): boolean {
+  if (!cutoffPassed(a)) return false;
+  const hours = changeCutoffHours(a.org_booking_rules, a.org_cancellation_policy);
+  const contact = [a.org_phone, a.org_email].filter(Boolean).join(' or ');
+  const when = hours ? `${hours} hour${hours === 1 ? '' : 's'} before` : 'at the start of';
+  res.status(409).json({
+    error: `Online changes close ${when} the appointment. Please contact ${a.org_name}${contact ? ` (${contact})` : ''} to change it.`,
+    code: 'CUTOFF_PASSED',
+    business: { name: a.org_name, phone: a.org_phone, email: a.org_email, website: a.org_website },
+  });
+  return true;
+}
+
 router.post('/appointments/manage/cancel', manageLimit, async (req, res, next) => {
   try {
     const appt = authorizeChange(req, res);
     if (!appt) return;
     const problem = customerChangeProblem(appt, 'cancelled');
     if (problem) { res.status(400).json({ error: problem }); return; }
+    if (refuseAfterCutoff(res, appt)) return;
 
     // Checked again under the write lock; the change and its history entry are saved together.
     const changed = db.transaction((): boolean => {
@@ -709,6 +759,7 @@ router.post('/appointments/manage/reschedule', manageLimit, async (req, res, nex
     if (!existing) return;
     const problem = customerChangeProblem(existing, 'rescheduled');
     if (problem) { res.status(400).json({ error: problem }); return; }
+    if (refuseAfterCutoff(res, existing)) return;
 
     const today = todayInTimezone(getOrgTimezone(existing.organization_id));
     if (date < today) {

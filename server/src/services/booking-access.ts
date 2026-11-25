@@ -1,10 +1,11 @@
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import db from '../db/init';
 import { deriveKey } from '../auth/session';
+import { zonedToInstant } from './zoned-time';
 
 // Customers manage a booking with a signed token instead of the booking reference alone.
-// A token names one appointment, carries its expiry, and is bound to the customer's email address,
-// so changing the customer's email invalidates links that were sent to the old address.
+// A token names one appointment, carries its expiry, and is bound to the customer's contact: the email address, or the
+// phone number for customers who gave no email (customerContact). Changing it invalidates links sent earlier.
 // Format: v1.<appointment id, base64url>.<expiry, unix seconds base36>.<HMAC-SHA256, base64url>
 
 const VERSION = 'v1';
@@ -21,6 +22,11 @@ function sign(appointmentId: string, exp: number, email: string): string {
   return createHmac('sha256', deriveKey('booking-manage-v1'))
     .update(`${VERSION}|${appointmentId}|${exp}|${normalizeEmail(email)}`)
     .digest('base64url');
+}
+
+/** The contact a manage token is bound to: the email address, or the phone number when there is no email. */
+export function customerContact(email: string | null | undefined, phone: string | null | undefined): string {
+  return (email ?? '').trim() || (phone ?? '').trim();
 }
 
 export function issueManageToken(appointmentId: string, customerEmail: string, expiresAtMs: number): string {
@@ -43,16 +49,18 @@ export interface ManagedAppointment {
   id: string; organization_id: string; booking_ref: string; service_id: string; staff_id: string; status: string;
   date: string; start_time: string; end_time: string; duration: number; timezone: string;
   price: number; currency: string; location: string | null;
-  customer_email: string; service_name: string; staff_name: string;
-  org_name: string; org_phone: string | null; org_website: string | null;
+  customer_email: string; customer_phone: string | null; service_name: string; staff_name: string;
+  org_name: string; org_phone: string | null; org_website: string | null; org_email: string | null;
+  org_booking_rules: string | null; org_cancellation_policy: string | null;
 }
 
 export function loadManagedAppointment(appointmentId: string): ManagedAppointment | undefined {
   return db.prepare(
     `SELECT a.id, a.organization_id, a.booking_ref, a.service_id, a.staff_id, a.status, a.date, a.start_time, a.end_time,
             a.duration, a.timezone, a.price, a.currency, a.location,
-            c.email AS customer_email, s.name AS service_name, st.name AS staff_name,
-            o.name AS org_name, o.phone AS org_phone, o.website AS org_website
+            c.email AS customer_email, c.phone AS customer_phone, s.name AS service_name, st.name AS staff_name,
+            o.name AS org_name, o.phone AS org_phone, o.website AS org_website, o.email AS org_email,
+            o.booking_rules AS org_booking_rules, o.cancellation_policy AS org_cancellation_policy
      FROM appointments a
      JOIN customers c ON c.id = a.customer_id
      JOIN services s ON s.id = a.service_id
@@ -76,7 +84,7 @@ export function verifyManageToken(token: string | undefined | null): TokenCheck 
 
   const appointment = loadManagedAppointment(appointmentId);
   if (!appointment) return { ok: false, reason: 'invalid' };
-  const expected = Buffer.from(sign(appointmentId, exp, appointment.customer_email));
+  const expected = Buffer.from(sign(appointmentId, exp, customerContact(appointment.customer_email, appointment.customer_phone)));
   const presented = Buffer.from(parts[3]);
   if (presented.length !== expected.length || !timingSafeEqual(presented, expected)) return { ok: false, reason: 'invalid' };
   // Expiry is reported only for genuine tokens, so the answer reveals nothing about forged ones.
@@ -85,6 +93,7 @@ export function verifyManageToken(token: string | undefined | null): TokenCheck 
 }
 
 function maskEmail(email: string): string {
+  if (!email) return '';
   const [local, domain] = email.split('@');
   if (!domain) return '•••';
   return `${local.slice(0, 1)}•••@${domain}`;
@@ -108,6 +117,31 @@ export function publicBookingView(a: ManagedAppointment) {
     serviceName: a.service_name,
     staffName: a.staff_name,
     maskedEmail: maskEmail(a.customer_email),
-    business: { name: a.org_name, phone: a.org_phone, website: a.org_website },
+    business: { name: a.org_name, phone: a.org_phone, website: a.org_website, email: a.org_email },
+    // V4: online changes are open until the business cutoff; after it the page shows the business contact details.
+    cutoffHours: changeCutoffHours(a.org_booking_rules, a.org_cancellation_policy),
+    canChange: ['scheduled', 'confirmed'].includes(a.status) && !cutoffPassed(a),
   };
+}
+
+/**
+ * Hours before the start until which customers may cancel or reschedule online. The V4 setting
+ * (bookingRules.customerChangeCutoffHours) wins; otherwise a deadline saved by the earlier cancellation-policy screen;
+ * otherwise 0 (until the appointment starts).
+ */
+export function changeCutoffHours(bookingRules: string | null | undefined, cancellationPolicy?: string | null): number {
+  const parse = (raw: string | null | undefined): Record<string, unknown> => {
+    try { const v = JSON.parse(raw ?? '{}'); return v && typeof v === 'object' ? v as Record<string, unknown> : {}; } catch { return {}; }
+  };
+  const valid = (v: unknown) => {
+    const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+    return typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 168 ? Math.floor(n) : null;
+  };
+  return valid(parse(bookingRules).customerChangeCutoffHours) ?? valid(parse(cancellationPolicy).cancelDeadline) ?? 0;
+}
+
+/** Whether the online-change cutoff has been reached at "now" (always true once the appointment has started). */
+export function cutoffPassed(a: { date: string; start_time: string; timezone: string; org_booking_rules?: string | null; org_cancellation_policy?: string | null }, now = Date.now()): boolean {
+  const hours = changeCutoffHours(a.org_booking_rules, a.org_cancellation_policy);
+  return now >= zonedToInstant(a.date, a.start_time, a.timezone) - hours * 3_600_000;
 }

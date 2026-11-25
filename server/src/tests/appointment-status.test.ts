@@ -77,7 +77,7 @@ describe('through the API', () => {
     }
   });
 
-  it('a future appointment cannot be marked complete or a no-show; it can still be confirmed or cancelled', async () => {
+  it('a future appointment cannot be marked complete or a no-show; it can still be cancelled ("confirmed" is read as scheduled)', async () => {
     const created = await request(app).post('/api/appointments').set(auth).send({ serviceId, staffId, customerId, date: day(10), startTime: '10:00' });
     expect(created.status).toBe(201);
     const id = created.body.data.id;
@@ -87,6 +87,7 @@ describe('through the API', () => {
       expect(statusOf(id)).toBe('scheduled');
     }
     expect((await put(id, { status: 'confirmed' })).status).toBe(200);
+    expect(statusOf(id)).toBe('scheduled');
     expect((await put(id, { status: 'cancelled' })).status).toBe(200);
     expect(statusOf(id)).toBe('cancelled');
   });

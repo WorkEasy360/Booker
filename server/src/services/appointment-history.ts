@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import db from '../db/init';
-import { queueWebhookEvent } from './integrations/webhooks';
+import { queueWebhookEvent, statusEvent } from './integrations/webhooks';
 import { planForChange } from './notifications/planner';
 import { kickNotifications } from './notifications/worker';
 
@@ -50,6 +50,8 @@ function insert(appt: AppointmentState, actor: HistoryActor, e: Entry): void {
   );
   // The business's webhooks (and Zapier) get the same change, queued in the same transaction.
   queueWebhookEvent(appt.organization_id, `appointment.${e.action}`, () => webhookData(appt.id, e, actor));
+  const specific = e.action === 'status_changed' ? statusEvent(e.to_status) : null;
+  if (specific) queueWebhookEvent(appt.organization_id, specific, () => webhookData(appt.id, e, actor));
   // Notifications to everyone concerned (customer, staff, business, calendar), planned in the same transaction.
   planForChange(appt.id, {
     entryId: id, action: e.action, fromStatus: e.from_status, toStatus: e.to_status, fromDate: e.from_date, fromStartTime: e.from_start_time,
@@ -58,19 +60,26 @@ function insert(appt: AppointmentState, actor: HistoryActor, e: Entry): void {
   kickNotifications();
 }
 
-/** What a webhook receives about a change: the booking as it is now, what changed and who changed it. */
+/**
+ * What a webhook receives about a change: the booking as it is now, what changed and who changed it. Minimal by default
+ * (V4 20.6): organization and appointment references, status, service and provider, date, time and time zone, and the
+ * customer's name. Never the internal note, the customer's answers, contact details or the manage-booking token.
+ */
 function webhookData(appointmentId: string, e: Entry, actor: HistoryActor) {
   const a = db.prepare(
-    `SELECT a.id, a.booking_ref, a.status, a.date, a.start_time, a.end_time, a.timezone, s.id AS service_id, s.name AS service_name,
-            st.id AS staff_id, st.name AS staff_name, c.name AS customer_name, c.email AS customer_email
+    `SELECT a.id, a.organization_id, a.booking_ref, a.status, a.date, a.start_time, a.end_time, a.timezone, a.updated_at,
+            s.id AS service_id, s.name AS service_name, st.id AS staff_id, st.name AS staff_name, c.id AS customer_id, c.name AS customer_name
      FROM appointments a JOIN services s ON s.id = a.service_id JOIN staff st ON st.id = a.staff_id JOIN customers c ON c.id = a.customer_id
      WHERE a.id = ?`
   ).get(appointmentId) as Record<string, string> | undefined;
   return {
+    version: 1,
+    organizationId: a?.organization_id ?? null,
     appointment: a ? {
-      id: a.id, bookingRef: a.booking_ref, status: a.status, date: a.date, startTime: a.start_time, endTime: a.end_time, timezone: a.timezone,
+      id: a.id, bookingRef: a.booking_ref, status: a.status === 'confirmed' ? 'scheduled' : a.status,
+      date: a.date, startTime: a.start_time, endTime: a.end_time, timezone: a.timezone, updatedAt: a.updated_at,
       service: { id: a.service_id, name: a.service_name }, staff: { id: a.staff_id, name: a.staff_name },
-      customer: { name: a.customer_name, email: a.customer_email },
+      customer: { id: a.customer_id, name: a.customer_name },
     } : { id: appointmentId },
     change: {
       action: e.action, fromStatus: e.from_status ?? null, toStatus: e.to_status ?? null,

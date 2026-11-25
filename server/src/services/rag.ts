@@ -66,12 +66,26 @@ function inverseFrequency(terms: string[], chunks: Array<Set<string>>): Map<stri
   }));
 }
 
-/** How informative each term is across all active knowledge (used to pick the section of an article that answers). */
+/**
+ * How informative each term is across all active knowledge (used to pick the section of an article that answers).
+ * A word found nowhere in the knowledge base weighs nothing: it cannot point to a section ("kaise", "karein" or a
+ * typo used to outweigh "create" in "appointment kaise create karein").
+ */
 export function termWeights(terms: string[]): Map<string, number> {
   const rows = db.prepare(
     `SELECT c.content FROM ai_knowledge_chunks c JOIN ai_knowledge_docs d ON c.doc_id = d.id WHERE d.is_active = 1`
   ).all() as Array<{ content: string }>;
-  return inverseFrequency(terms, rows.map(r => new Set(tokenize(r.content))));
+  const chunks = rows.map(r => new Set(tokenize(r.content)));
+  const weights = inverseFrequency(terms, chunks);
+  // Known means some word of the knowledge base has the same stem, or one stem starts with the other
+  // ("forgot" and "forgotten"), as section headings are compared.
+  const stems = new Set(chunks.flatMap(c => [...c].map(stem)));
+  for (const t of terms) {
+    const s = stem(t);
+    const known = stems.has(s) || [...stems].some(h => Math.min(h.length, s.length) >= 5 && (h.startsWith(s) || s.startsWith(h)));
+    if (!known) weights.set(t, 0);
+  }
+  return weights;
 }
 
 // BM25 constants
@@ -129,12 +143,14 @@ export function indexDocument(doc: {
 }): string {
   const docId = doc.id ?? `kdoc-${nanoid(10)}`;
 
-  // Delete existing chunks if re-indexing
+  // Re-indexing replaces the chunks and everything that describes the article (a rewritten built-in article keeps its id
+  // but may get a new title or category), and makes it active again.
   const existing = db.prepare('SELECT id FROM ai_knowledge_docs WHERE id = ?').get(docId);
   if (existing) {
     db.prepare('DELETE FROM ai_knowledge_chunks WHERE doc_id = ?').run(docId);
-    db.prepare(`UPDATE ai_knowledge_docs SET content = ?, last_updated = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`)
-      .run(doc.content, docId);
+    db.prepare(`UPDATE ai_knowledge_docs SET title = ?, category = ?, source = ?, access_scope = ?, content = ?, is_active = 1,
+        last_updated = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`)
+      .run(doc.title, doc.category, doc.source ?? null, doc.accessScope ?? 'authenticated', doc.content, docId);
   } else {
     db.prepare(`INSERT INTO ai_knowledge_docs (id, organization_id, title, category, source, access_scope, content)
       VALUES (?, ?, ?, ?, ?, ?, ?)`)

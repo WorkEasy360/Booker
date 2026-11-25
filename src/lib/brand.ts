@@ -6,18 +6,18 @@
  * The server keeps the same values in server/src/brand.ts for emails (tests/unit/brand.test.ts checks they match).
  * Plain TypeScript with no imports, so the Node unit tests can load it directly.
  */
-export const PRODUCT_NAME = 'WorkeasyBooking';
+export const PRODUCT_NAME = 'WorkEasy360 Booking';
 export const COMPANY_NAME = 'WorkEasy360';
 export const PRODUCT_ATTRIBUTION = 'A WorkEasy360 Product';
-export const PRODUCT_DESCRIPTION = 'Smart appointment scheduling for businesses';
+export const PRODUCT_DESCRIPTION = 'Simple Appointment Scheduling for Growing Businesses';
 /** Subtle platform credit on a business's public booking pages. */
 export const POWERED_BY = `Powered by ${PRODUCT_NAME}`;
 
 /** The same values as `primary`, `primary-dark`, `navy` and `accent` in tailwind.config.js. */
 export const BRAND_COLORS = {
-  primary: '#00BF62',
-  secondary: '#008F49',
-  navy: '#13222E',
+  primary: '#16A34A',
+  secondary: '#15803D',
+  navy: '#0B3D35',
   accent: '#FFC940',
 } as const;
 

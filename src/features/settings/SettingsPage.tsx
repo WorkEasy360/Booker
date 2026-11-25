@@ -1,123 +1,97 @@
 import React from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Settings, Building2, Briefcase, Bell, Globe, Users, Workflow, Plug, UserRound } from 'lucide-react';
 import { usePageTitle } from '@/hooks/usePageTitle';
-import {
-  Building2, Palette, Clock, CalendarDays, Ban,
-  Bell, Shield, Lock, Globe,
-} from 'lucide-react';
-import { PageHeader } from '@/components/ui';
+import { PageTitle } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import type { Permission } from '@/lib/permissions';
+import { BusinessSection } from './BusinessSection';
+import { ServicesSection } from './ServicesSection';
+import { NotificationsSection } from './NotificationsSection';
+import { PublicBookingSection } from './PublicBookingSection';
+import { TeamSection } from './TeamSection';
+import { AutomationSection } from './AutomationSection';
+import { IntegrationsSection } from './IntegrationsSection';
 
-import {
-  BusinessProfileSection,
-  BrandingSection,
-  WorkingHoursSection,
-  BookingRulesSection,
-} from './SettingsSectionsA';
+type TabId = 'business' | 'services' | 'notifications' | 'public-booking' | 'team' | 'automation' | 'integrations';
 
-import {
-  CancellationSection,
-  NotificationsSection,
-  RolesSection,
-  SecuritySection,
-  LanguageSection,
-} from './SettingsSectionsB';
-
-// ─── Nav config ──────────────────────────────────────────────────────────────
-
-interface NavItem {
-  id: string;
+interface Tab {
+  id: TabId;
   label: string;
   icon: React.ElementType;
-  /** Sections everyone can open; the rest change business settings and need settings:write. */
-  personal?: boolean;
+  /** Any one of these opens the section; the server checks every change again. */
+  needs: Permission[];
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { id: 'business',      label: 'Business Profile',    icon: Building2 },
-  { id: 'branding',      label: 'Branding',            icon: Palette },
-  { id: 'hours',         label: 'Working Hours',        icon: Clock },
-  { id: 'booking',       label: 'Booking Rules',        icon: CalendarDays },
-  { id: 'cancellation',  label: 'Cancellation Policy',  icon: Ban },
-  { id: 'notifications', label: 'Notifications',        icon: Bell },
-  { id: 'roles',         label: 'Roles & Permissions',  icon: Shield, personal: true },
-  { id: 'security',      label: 'Security',             icon: Lock, personal: true },
-  { id: 'language',      label: 'Language & Region',    icon: Globe },
+// V4 Settings: one place for each setting.
+const TABS: Tab[] = [
+  { id: 'business',       label: 'Business Details', icon: Building2, needs: ['settings:write'] },
+  { id: 'services',       label: 'Services',         icon: Briefcase, needs: ['services:write', 'settings:write'] },
+  { id: 'notifications',  label: 'Notifications',    icon: Bell,      needs: ['settings:write'] },
+  { id: 'public-booking', label: 'Public Booking',   icon: Globe,     needs: ['booking_pages:write', 'settings:write'] },
+  { id: 'team',           label: 'Team',             icon: Users,     needs: ['staff:manage'] },
+  { id: 'automation',     label: 'Internal Automation', icon: Workflow, needs: ['settings:write'] },
+  { id: 'integrations',   label: 'Integrations',     icon: Plug,      needs: ['settings:write'] },
 ];
-
-const SECTION_MAP: Record<string, React.ComponentType> = {
-  business:      BusinessProfileSection,
-  branding:      BrandingSection,
-  hours:         WorkingHoursSection,
-  booking:       BookingRulesSection,
-  cancellation:  CancellationSection,
-  notifications: NotificationsSection,
-  roles:         RolesSection,
-  security:      SecuritySection,
-  language:      LanguageSection,
-};
-
-// ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
   usePageTitle('Settings');
   const { tab } = useParams<{ tab?: string }>();
   const navigate = useNavigate();
   const { can } = useAuth();
-  const navItems = can('settings:write') ? NAV_ITEMS : NAV_ITEMS.filter(i => i.personal);
-  const allowed = new Set(navItems.map(i => i.id));
-  // Business settings open on the business profile; everyone else starts on their own account security.
+  const tabs = TABS.filter(t => t.needs.some(p => can(p)));
   // The section comes from the address every time, so a direct link, a refresh and back/forward all show the right one.
-  const active = tab && SECTION_MAP[tab] && allowed.has(tab) ? tab : (can('settings:write') ? 'business' : 'security');
-
-  function select(id: string) {
-    // A normal history entry per section, so the browser's back and forward buttons move between them.
-    if (id !== active) navigate(`/settings/${id}`);
-  }
-
-  const SectionComponent = SECTION_MAP[active] ?? SecuritySection;
+  const active = tabs.find(t => t.id === tab) ?? tabs[0];
 
   return (
     <div className="page-container">
-      <PageHeader
-        title="Settings"
-        description={can('settings:write') ? 'Manage your organization preferences and configuration' : 'Your account security and what your role can do'}
-        breadcrumbs={[{ label: 'Settings' }]}
-      />
+      <PageTitle icon={Settings} title="Settings" description="Business details, services, notifications and team — all in one place." />
 
-      <div className="mt-6 flex flex-col md:flex-row gap-6 items-stretch md:items-start">
-        {/* Sidebar nav */}
-        <nav aria-label="Settings sections" className="w-full md:w-56 shrink-0 bg-surface rounded-xl border border-border p-2">
-          <ul className="space-y-0.5">
-            {navItems.map(item => {
-              const Icon = item.icon;
-              return (
-                <li key={item.id}>
-                  <button
-                    onClick={() => select(item.id)}
-                    aria-current={active === item.id ? 'page' : undefined}
-                    className={cn(
-                      'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors text-left',
-                      active === item.id
-                        ? 'bg-primary-light text-primary font-semibold'
-                        : 'text-text-secondary hover:bg-muted hover:text-text-primary'
-                    )}
-                  >
-                    <Icon className="w-4 h-4 shrink-0" />
-                    {item.label}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-
-        {/* Content area */}
-        <div className="flex-1 min-w-0">
-          <SectionComponent />
+      {!active ? (
+        <div className="panel p-6 mt-6 max-w-xl">
+          <p className="text-base font-semibold text-text-primary">Business settings are managed by your owner</p>
+          <p className="text-sm text-text-secondary mt-1">Your password, two-factor sign-in and language are in My Account.</p>
+          <Link to="/account" className="btn-primary mt-4"><UserRound className="w-4 h-4" aria-hidden="true" />Open My Account</Link>
         </div>
-      </div>
+      ) : (
+        <div className="mt-6 flex flex-col lg:flex-row gap-6 items-stretch lg:items-start">
+          <nav aria-label="Settings sections" className="lg:w-60 shrink-0 panel p-2 lg:sticky lg:top-24">
+            <ul className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible -mx-0.5 px-0.5">
+              {tabs.map(t => {
+                const Icon = t.icon;
+                const on = t.id === active.id;
+                return (
+                  <li key={t.id} className="shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => { if (!on) navigate(`/settings/${t.id}`); }}
+                      aria-current={on ? 'page' : undefined}
+                      className={cn(
+                        'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors text-left whitespace-nowrap min-h-[44px]',
+                        on ? 'bg-primary-light text-primary font-semibold' : 'text-text-secondary hover:bg-muted hover:text-text-primary',
+                      )}
+                    >
+                      <Icon className="w-[18px] h-[18px] shrink-0" aria-hidden="true" />
+                      {t.label}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+
+          <div className="flex-1 min-w-0">
+            {active.id === 'business' && <BusinessSection />}
+            {active.id === 'services' && <ServicesSection canEdit={can('services:write')} />}
+            {active.id === 'notifications' && <NotificationsSection canEdit={can('settings:write')} />}
+            {active.id === 'public-booking' && <PublicBookingSection canEdit={can('settings:write') || can('booking_pages:write')} canEditCutoff={can('settings:write')} />}
+            {active.id === 'team' && <TeamSection />}
+            {active.id === 'automation' && <AutomationSection />}
+            {active.id === 'integrations' && <IntegrationsSection />}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

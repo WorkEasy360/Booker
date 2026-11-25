@@ -11,3 +11,4 @@ export { EmptyState, Spinner } from './Empty';
 export { PageHeader } from './PageHeader';
 export { Table, Pagination } from './Table';
 export { Tabs } from './Tabs';
+export { PageTitle } from './PageTitle';

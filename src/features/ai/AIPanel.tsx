@@ -10,12 +10,12 @@ import { MessageBubble } from './MessageBubble';
 import agentLogo from '../../assets/brand/agent-logo.png';
 
 const SUGGESTIONS = [
-  'How do I add a new staff member?',
+  'How do I block a holiday?',
   'Show me available slots for tomorrow',
-  'Create a 30-minute consultation service for ₹500',
-  "What's my appointment count this month?",
+  'Create a 30-minute consultation service',
+  'How many appointments do I have this week?',
   'Go to the calendar',
-  'Find customer by name',
+  'How do I share my booking link?',
 ];
 
 export function AIPanel() {
@@ -75,7 +75,7 @@ export function AIPanel() {
         role="complementary"
         aria-label="AI Assistant"
         className={cn(
-          'fixed right-0 top-0 h-screen z-40 flex flex-col',
+          'fixed right-0 inset-y-0 z-40 flex flex-col',
           'w-full sm:w-[400px] lg:w-[420px]',
           'bg-white border-l border-gray-200 shadow-2xl',
           'transition-transform duration-200',

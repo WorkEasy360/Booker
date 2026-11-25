@@ -461,8 +461,10 @@ describe('the earlier notification settings and the rules', () => {
     expect((await request(app).get('/api/settings/notifications').set(B.h)).body.data).toMatchObject({ remindersEnabled: false, staffAlertsEnabled: false });
     v = await view();
     expect(rule(v, 'reminder', 'customer')).toBe(false);
-    expect(rule(v, 'confirmed', 'customer')).toBe(true); // the customer's booking emails cannot be switched off
-    expect((await rules(B, [['confirmed', 'customer', 'email', false]])).body.data.find((r: { event: string; role: string; channel: string }) => r.event === 'confirmed' && r.role === 'customer' && r.channel === 'email')).toMatchObject({ enabled: true, locked: true });
+    expect(rule(v, 'confirmed', 'customer')).toBe(true); // customer booking emails are on until the business turns them off
+    // V4 "Email On / Off": the customer's booking emails can be switched off, and back on.
+    expect((await rules(B, [['confirmed', 'customer', 'email', false]])).body.data.find((r: { event: string; role: string; channel: string }) => r.event === 'confirmed' && r.role === 'customer' && r.channel === 'email')).toMatchObject({ enabled: false, locked: false });
+    expect((await rules(B, [['confirmed', 'customer', 'email', true]])).body.data.find((r: { event: string; role: string; channel: string }) => r.event === 'confirmed' && r.role === 'customer' && r.channel === 'email')).toMatchObject({ enabled: true, locked: false });
   });
 });
 

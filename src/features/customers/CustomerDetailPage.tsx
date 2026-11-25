@@ -1,277 +1,203 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { usePageTitle } from '@/hooks/usePageTitle';
-import { CalendarPlus, Mail, Phone, Globe, Calendar, ChevronRight } from 'lucide-react';
-import {
-  Button, Avatar, Badge, StatusBadge, PageHeader, Tabs, Textarea, Input, Select, useToast,
-} from '@/components/ui';
-import { customersApi, appointmentsApi } from '@/api/client';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, CalendarPlus, Pencil, Phone, Mail, CalendarDays, ChevronRight, ContactRound } from 'lucide-react';
+import { Avatar, Spinner, StatusBadge } from '@/components/ui';
+import { appointmentsApi, customersApi } from '@/api/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { CustomerConsentCard } from './CustomerConsentCard';
-import { formatDate, formatTime, TIMEZONES } from '@/lib/utils';
-import { emailError, phoneError, PHONE_PLACEHOLDER } from '@/lib/validation';
+import { usePageTitle } from '@/hooks/usePageTitle';
+import { formatDate, formatTime, localDateISO } from '@/lib/utils';
+import { normalizeCustomer, type CustomerRecord } from './customerData';
 
-function tagVariant(tag: string): 'default' | 'success' | 'warning' | 'info' | 'purple' | 'primary' {
-  const map: Record<string, 'default' | 'success' | 'warning' | 'info' | 'purple' | 'primary'> = {
-    vip: 'warning', regular: 'default', new: 'success',
-    corporate: 'info', sports: 'purple', referral: 'primary',
-  };
-  return map[tag] ?? 'default';
+interface HistoryRow {
+  id: string; status: string; date: string; startTime: string; endTime?: string; duration?: number;
+  serviceName?: string; staffName?: string;
 }
 
-const TZ_OPTIONS = [
-  { value: '', label: 'Select timezone' },
-  ...TIMEZONES.map(tz => ({ value: tz, label: tz })),
-];
-
-interface ApiCustomer {
-  id: string;
-  name: string;
-  email: string;
-  phone?: string;
-  timezone?: string;
-  notes?: string;
-  tags: string[];
-  totalBookings: number;
-  lastBookingDate?: string;
-  createdAt: string;
-}
-
-interface ApiAppointment {
-  id: string;
-  status: string;
-  date: string;
-  startTime: string;
-  serviceName: string;
-  staffName: string;
-}
-
+/** Customer details: contact details, appointment history, Book Appointment / Edit Contact Details. */
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const toast = useToast();
   const { can } = useAuth();
-  usePageTitle('Customer');
-
-  const [customer, setCustomer] = useState<ApiCustomer | null>(null);
-  const [appointments, setAppointments] = useState<ApiAppointment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [customer, setCustomer] = useState<CustomerRecord | null>(null);
+  const [history, setHistory] = useState<HistoryRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const [notes, setNotes] = useState('');
-  const [detailName, setDetailName] = useState('');
-  const [detailEmail, setDetailEmail] = useState('');
-  const [detailPhone, setDetailPhone] = useState('');
-  const [detailTz, setDetailTz] = useState('');
-  const [savingNotes, setSavingNotes] = useState(false);
-  const [savingDetails, setSavingDetails] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  usePageTitle(customer?.name ?? 'Customer');
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([
-      customersApi.get(id) as Promise<ApiCustomer>,
-      appointmentsApi.list({ customerId: id }) as Promise<ApiAppointment[]>,
-    ])
-      .then(([cust, apts]) => {
-        setCustomer(cust);
-        setAppointments(apts);
-        setNotes(cust.notes ?? '');
-        setDetailName(cust.name);
-        setDetailEmail(cust.email);
-        setDetailPhone(cust.phone ?? '');
-        setDetailTz(cust.timezone ?? '');
-        setLoading(false);
-      })
-      .catch((e: Error) => { setError(e.message ?? 'Failed to load customer.'); setLoading(false); });
+    customersApi.get(id)
+      .then(raw => setCustomer(normalizeCustomer(raw)))
+      .catch((e: Error) => setError(e.message || 'Could not load this customer.'));
+    appointmentsApi.list({ customerId: id })
+      .then(rows => setHistory(rows as HistoryRow[]))
+      .catch((e: Error) => { setHistory([]); setHistoryError(e.message || 'Could not load appointment history.'); });
   }, [id]);
 
-  if (loading) {
+  const today = localDateISO();
+  const { upcoming, past } = useMemo(() => {
+    const rows = [...(history ?? [])];
+    const up = rows.filter(a => a.date >= today && (a.status === 'scheduled' || a.status === 'confirmed'))
+      .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
+    const upIds = new Set(up.map(a => a.id));
+    const rest = rows.filter(a => !upIds.has(a.id)).sort((a, b) => `${b.date} ${b.startTime}`.localeCompare(`${a.date} ${a.startTime}`));
+    return { upcoming: up, past: rest };
+  }, [history, today]);
+
+  if (error) {
     return (
-      <div className="page-container">
-        <div className="mt-8 text-center text-sm text-text-muted">Loading customer…</div>
+      <div className="page-container space-y-4">
+        <BackLink />
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       </div>
     );
   }
-
-  if (error || !customer) {
-    return (
-      <div className="page-container">
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <p className="text-text-primary font-semibold mb-2">{error ? 'Failed to load customer' : 'Customer not found'}</p>
-          <p className="text-text-secondary text-sm mb-4">{error ?? 'The requested customer does not exist.'}</p>
-          <Button variant="secondary" onClick={() => navigate('/customers')}>Back to Customers</Button>
-        </div>
-      </div>
-    );
-  }
-
-  const upcoming = appointments.filter(a => a.status === 'scheduled' || a.status === 'confirmed');
-
-  async function handleSaveNotes() {
-    if (!id) return;
-    setSavingNotes(true);
-    try {
-      await customersApi.update(id, { notes });
-      toast.success('Notes saved successfully');
-    } catch (e: unknown) {
-      toast.error('Failed to save notes', (e as Error).message);
-    } finally {
-      setSavingNotes(false);
-    }
-  }
-
-  async function handleSaveDetails() {
-    if (!id || !detailName.trim() || !detailEmail.trim() || emailError(detailEmail) || phoneError(detailPhone)) return;
-    setSavingDetails(true);
-    try {
-      const updated = await customersApi.update(id, {
-        name: detailName.trim(),
-        email: detailEmail.trim(),
-        phone: detailPhone.trim(),
-        timezone: detailTz || undefined,
-      }) as ApiCustomer;
-      setCustomer(prev => prev ? { ...prev, ...updated } : null);
-      toast.success('Details updated');
-    } catch (e: unknown) {
-      toast.error('Failed to update details', (e as Error).message);
-    } finally {
-      setSavingDetails(false);
-    }
-  }
-
-  const bookingsTab = (
-    <div className="space-y-2">
-      {appointments.length === 0 ? (
-        <div className="py-12 text-center">
-          <Calendar className="w-10 h-10 text-text-muted mx-auto mb-3" />
-          <p className="text-sm font-semibold text-text-primary">No bookings yet</p>
-          <p className="text-xs text-text-secondary mt-1">This customer hasn't made any appointments.</p>
-          <Button size="sm" className="mt-4" onClick={() => navigate('/appointments/new')}>
-            Book Now
-          </Button>
-        </div>
-      ) : appointments.map(apt => (
-        <div
-          key={apt.id}
-          className="flex items-center justify-between p-3 rounded-lg border border-border bg-background hover:border-primary/30 cursor-pointer transition-colors"
-          onClick={() => navigate(`/appointments/${apt.id}`)}
-        >
-          <div className="flex items-center gap-3">
-            <div className="text-center w-14 shrink-0">
-              <p className="text-xs font-bold text-text-primary">{formatDate(apt.date, 'MMM d')}</p>
-              <p className="text-xs text-text-secondary">{formatTime(apt.startTime)}</p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-text-primary">{apt.serviceName || '—'}</p>
-              <p className="text-xs text-text-secondary">with {apt.staffName || '—'}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <StatusBadge status={apt.status} />
-            <ChevronRight className="w-4 h-4 text-text-muted" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-
-  const notesTab = (
-    <div className="space-y-4 max-w-lg">
-      <Textarea
-        label="Customer Notes"
-        hint="Notes are private and only visible to staff."
-        rows={6}
-        value={notes}
-        onChange={e => setNotes(e.target.value)}
-        placeholder="Add notes about this customer..."
-      />
-      <Button onClick={handleSaveNotes} loading={savingNotes}>Save Notes</Button>
-    </div>
-  );
-
-  const detailsTab = (
-    <div className="space-y-4 max-w-md">
-      <Input label="Full Name" required value={detailName} onChange={e => setDetailName(e.target.value)} />
-      <Input label="Email Address" required type="email" value={detailEmail} onChange={e => setDetailEmail(e.target.value)} error={emailError(detailEmail)} />
-      <Input label="Phone" type="tel" placeholder={PHONE_PLACEHOLDER} value={detailPhone} onChange={e => setDetailPhone(e.target.value)} error={phoneError(detailPhone)} />
-      <Select label="Timezone" options={TZ_OPTIONS} value={detailTz} onChange={e => setDetailTz(e.target.value)} />
-      <Button onClick={handleSaveDetails} loading={savingDetails} disabled={!detailName.trim() || !detailEmail.trim() || !!emailError(detailEmail) || !!phoneError(detailPhone)}>
-        Save Details
-      </Button>
-    </div>
-  );
-
-  const tabs = [
-    { id: 'bookings', label: 'Bookings', count: appointments.length, content: bookingsTab },
-    { id: 'notes', label: 'Notes', content: notesTab },
-    { id: 'details', label: 'Details', content: detailsTab },
-  ];
+  if (!customer) return <div className="page-container"><BackLink /><div className="flex justify-center py-16"><Spinner /></div></div>;
 
   return (
-    <div className="page-container">
-      <PageHeader
-        title={customer.name}
-        breadcrumbs={[{ label: 'Customers', href: '/customers' }, { label: customer.name }]}
-        actions={
-          <Button icon={<CalendarPlus className="w-4 h-4" />} onClick={() => navigate('/appointments/new')}>
-            Book Appointment
-          </Button>
-        }
-      />
+    <div className="page-container space-y-6">
+      <BackLink />
 
-      <div className="card p-6 mb-6">
-        <div className="flex flex-col sm:flex-row items-start gap-5">
-          <Avatar name={customer.name} size="xl" />
-          <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-2 mb-1">
-              <h2 className="text-xl font-bold text-text-primary">{customer.name}</h2>
-              {customer.tags.map(t => (
-                <Badge key={t} variant={tagVariant(t)} size="sm">{t}</Badge>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
-              <span className="flex items-center gap-1.5 text-sm text-text-secondary">
-                <Mail className="w-3.5 h-3.5 shrink-0" />{customer.email}
-              </span>
-              {customer.phone && (
-                <span className="flex items-center gap-1.5 text-sm text-text-secondary">
-                  <Phone className="w-3.5 h-3.5 shrink-0" />{customer.phone}
-                </span>
-              )}
-              {customer.timezone && (
-                <span className="flex items-center gap-1.5 text-sm text-text-secondary">
-                  <Globe className="w-3.5 h-3.5 shrink-0" />{customer.timezone}
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-text-muted mt-2">Member since {formatDate(customer.createdAt)}</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-4 mt-5 pt-5 border-t border-border">
-          <div className="text-center">
-            <p className="text-2xl font-bold text-text-primary">{appointments.length}</p>
-            <p className="text-xs text-text-secondary">Total Bookings</p>
-          </div>
-          <div className="text-center">
-            <p className="text-sm font-semibold text-text-primary">
-              {customer.lastBookingDate ? formatDate(customer.lastBookingDate) : '—'}
+      {/* Header: name and actions */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-4 min-w-0">
+          <Avatar name={customer.name} size="xl" color="#16A34A" decorative />
+          <div className="min-w-0">
+            <h1 className="text-2xl sm:text-[32px] sm:leading-[38px] font-bold text-text-primary tracking-tight truncate">{customer.name}</h1>
+            <p className="text-sm sm:text-base text-text-secondary mt-0.5">
+              {history ? `${history.length} appointment${history.length === 1 ? '' : 's'}` : 'Customer'}
             </p>
-            <p className="text-xs text-text-secondary">Last Booking</p>
           </div>
-          <div className="text-center">
-            <p className="text-2xl font-bold text-primary">{upcoming.length}</p>
-            <p className="text-xs text-text-secondary">Upcoming</p>
-          </div>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {can('customers:write') && (
+            <Link to={`/customers/${customer.id}/edit`} className="btn-secondary min-h-[48px] px-5">
+              <Pencil className="w-4 h-4" aria-hidden="true" />Edit Contact Details
+            </Link>
+          )}
+          {can('appointments:write') && (
+            <Link to={`/appointments/new?customerId=${encodeURIComponent(customer.id)}`} className="btn-primary min-h-[48px] px-5 text-base">
+              <CalendarPlus className="w-5 h-5" aria-hidden="true" />Book Appointment
+            </Link>
+          )}
         </div>
       </div>
 
-      {can('customers:read') && <CustomerConsentCard customerId={customer.id} canEdit={can('customers:write')} />}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-6 items-start">
+        {/* Contact details */}
+        <section className="panel p-5 sm:p-6" aria-labelledby="contact-title">
+          <div className="flex items-center gap-3 mb-4">
+            <span className="icon-tile w-10 h-10 bg-primary-light text-primary"><ContactRound className="w-5 h-5" aria-hidden="true" /></span>
+            <h2 id="contact-title" className="text-xl font-semibold text-text-primary">Contact Details</h2>
+          </div>
+          <dl className="divide-y divide-border">
+            <Detail label="Name" value={customer.name} />
+            <Detail label="Phone" icon={Phone} value={customer.phone} href={customer.phone ? `tel:${customer.phone.replace(/\s/g, '')}` : undefined} />
+            <Detail label="Email" icon={Mail} value={customer.email} href={customer.email ? `mailto:${customer.email}` : undefined} />
+          </dl>
+          {!customer.email && (
+            <p className="mt-4 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">No email address: booking confirmations and reminders cannot be emailed to this customer.</p>
+          )}
+        </section>
 
-      <div className="card p-6">
-        <Tabs tabs={tabs} defaultTab={searchParams.get('tab') ?? 'bookings'} variant="underline" />
+        {/* Appointment history */}
+        <section className="panel" aria-labelledby="history-title">
+          <div className="flex items-center gap-3 px-5 sm:px-6 pt-5 sm:pt-6 pb-4">
+            <span className="icon-tile w-10 h-10 bg-primary-light text-primary"><CalendarDays className="w-5 h-5" aria-hidden="true" /></span>
+            <h2 id="history-title" className="text-xl font-semibold text-text-primary">Appointment History</h2>
+          </div>
+          {historyError && <p role="alert" className="mx-5 sm:mx-6 mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{historyError}</p>}
+          {history === null ? (
+            <div className="flex justify-center py-10"><Spinner /></div>
+          ) : history.length === 0 && !historyError ? (
+            <div className="border-t border-border px-6 py-12 text-center">
+              <p className="text-[15px] font-medium text-text-primary">No appointments yet</p>
+              {can('appointments:write') && (
+                <button type="button" className="btn-primary mt-4 min-h-[44px]" onClick={() => navigate(`/appointments/new?customerId=${encodeURIComponent(customer.id)}`)}>
+                  <CalendarPlus className="w-4 h-4" aria-hidden="true" />Book Appointment
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="pb-3">
+              {upcoming.length > 0 && <HistoryGroup title="Upcoming" rows={upcoming} />}
+              {past.length > 0 && <HistoryGroup title="Past and cancelled" rows={past} />}
+            </div>
+          )}
+        </section>
       </div>
+    </div>
+  );
+}
+
+function BackLink() {
+  return (
+    <Link to="/customers" className="inline-flex items-center gap-1.5 text-sm font-medium text-text-secondary hover:text-text-primary">
+      <ArrowLeft className="w-4 h-4" aria-hidden="true" />Back to customers
+    </Link>
+  );
+}
+
+function Detail({ label, value, icon: Icon, href }: { label: string; value: string | null; icon?: React.ElementType; href?: string }) {
+  return (
+    <div className="py-3 first:pt-0">
+      <dt className="text-sm text-text-secondary">{label}</dt>
+      <dd className="mt-0.5 flex items-center gap-2 text-[15px] font-medium text-text-primary break-all">
+        {Icon && value && <Icon className="w-4 h-4 text-text-muted shrink-0" aria-hidden="true" />}
+        {value ? (href ? <a href={href} className="hover:text-primary">{value}</a> : value) : <span className="font-normal text-text-muted">Not provided</span>}
+      </dd>
+    </div>
+  );
+}
+
+function HistoryGroup({ title, rows }: { title: string; rows: HistoryRow[] }) {
+  const time = (a: HistoryRow) => `${formatTime(a.startTime)}${a.endTime ? ` – ${formatTime(a.endTime)}` : ''}`;
+  return (
+    <div className="px-4 sm:px-5 pb-2">
+      <h3 className="px-1 pt-2 pb-2 text-sm font-semibold uppercase tracking-wide text-text-muted">{title}</h3>
+      {/* Desktop table */}
+      <table className="hidden md:table w-full text-[15px]">
+        <thead>
+          <tr className="bg-[#F3F5F8] text-left text-text-primary">
+            <th scope="col" className="rounded-l-lg px-4 py-3 font-semibold">Date</th>
+            <th scope="col" className="px-4 py-3 font-semibold">Time</th>
+            <th scope="col" className="px-4 py-3 font-semibold">Service</th>
+            <th scope="col" className="px-4 py-3 font-semibold">Staff</th>
+            <th scope="col" className="rounded-r-lg px-4 py-3 font-semibold">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {rows.map(a => (
+            <tr key={a.id} className="hover:bg-gray-50/80">
+              <td className="px-4 py-3.5 whitespace-nowrap">
+                <Link to={`/appointments/${a.id}`} className="font-medium text-text-primary hover:text-primary">{formatDate(a.date, 'EEE, d MMM yyyy')}</Link>
+              </td>
+              <td className="px-4 py-3.5 whitespace-nowrap text-text-secondary">{time(a)}</td>
+              <td className="px-4 py-3.5 text-text-primary">{a.serviceName ?? '—'}</td>
+              <td className="px-4 py-3.5 text-text-secondary">{a.staffName ?? '—'}</td>
+              <td className="px-4 py-3.5"><StatusBadge status={a.status} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {/* Mobile cards */}
+      <ul className="md:hidden space-y-2">
+        {rows.map(a => (
+          <li key={a.id}>
+            <Link to={`/appointments/${a.id}`} className="flex items-center gap-3 rounded-xl border border-border px-4 py-3 min-h-[64px] active:bg-gray-50">
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] font-semibold text-text-primary">{formatDate(a.date, 'EEE, d MMM yyyy')}</p>
+                <p className="text-sm text-text-secondary">{time(a)}</p>
+                <p className="text-sm text-text-secondary truncate">{a.serviceName ?? '—'}{a.staffName ? ` · ${a.staffName}` : ''}</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <StatusBadge status={a.status} />
+                <ChevronRight className="w-5 h-5 text-text-muted" aria-hidden="true" />
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

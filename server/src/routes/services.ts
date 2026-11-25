@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import db from '../db/init';
+import { syncDefaultBookingPage } from '../services/default-booking-page';
 import { requireAuth, requirePermission, type AuthRequest } from '../middleware/auth';
 import { missingIds, syncServiceStaff, syncServiceResources, syncServiceWorkspaces } from '../services/relations';
 import { CurrencySchema } from '../currency';
@@ -118,6 +119,7 @@ router.post('/', canWrite, (req: AuthRequest, res, next) => {
     syncServiceStaff(orgId, id, data.staffIds ?? []);
     syncServiceResources(orgId, id, data.resourceIds ?? []);
     syncServiceWorkspaces(orgId, id, data.workspaceIds ?? []);
+    syncDefaultBookingPage(orgId);
     })();
     const row = db.prepare('SELECT * FROM services WHERE id = ?').get(id) as Record<string, unknown>;
     res.status(201).json({ data: rowToService(row) });
@@ -168,6 +170,7 @@ router.put('/:id', canWrite, (req: AuthRequest, res, next) => {
       if (data.staffIds !== undefined) syncServiceStaff(req.user!.orgId, req.params.id, data.staffIds);
       if (data.resourceIds !== undefined) syncServiceResources(req.user!.orgId, req.params.id, data.resourceIds);
       if (data.workspaceIds !== undefined) syncServiceWorkspaces(req.user!.orgId, req.params.id, data.workspaceIds);
+      syncDefaultBookingPage(req.user!.orgId);
     })();
 
     const row = db.prepare('SELECT * FROM services WHERE id = ?').get(req.params.id) as Record<string, unknown>;
@@ -181,7 +184,7 @@ router.delete('/:id', canWrite, (req: AuthRequest, res, next) => {
       const r = db
         .prepare('DELETE FROM services WHERE id = ? AND organization_id = ?')
         .run(req.params.id, req.user!.orgId);
-      if (r.changes > 0) { syncServiceStaff(req.user!.orgId, req.params.id, []); syncServiceResources(req.user!.orgId, req.params.id, []); syncServiceWorkspaces(req.user!.orgId, req.params.id, []); }
+      if (r.changes > 0) { syncServiceStaff(req.user!.orgId, req.params.id, []); syncServiceResources(req.user!.orgId, req.params.id, []); syncServiceWorkspaces(req.user!.orgId, req.params.id, []); syncDefaultBookingPage(req.user!.orgId); }
       return r;
     })();
     if (result.changes === 0) { res.status(404).json({ error: 'Service not found' }); return; }

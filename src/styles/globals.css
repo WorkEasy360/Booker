@@ -4,18 +4,18 @@
 
 @layer base {
   :root {
-    --color-primary: #00BF62;
-    --color-primary-dark: #008F49;
-    --color-primary-light: #E6F9F0;
-    --color-navy: #13222E;
-    --color-navy-light: #1E3344;
+    --color-primary: #16A34A;
+    --color-primary-dark: #15803D;
+    --color-primary-light: #E8F7EE;
+    --color-navy: #0B3D35;
+    --color-navy-light: #0F5A47;
     --color-accent: #FFC940;
-    --color-background: #F6F8F9;
+    --color-background: #F5F7FA;
     --color-surface: #FFFFFF;
-    --color-border: #E1E7EB;
+    --color-border: #E4E9EF;
     --color-muted: #EEF3F2;
-    --color-text-primary: #17232D;
-    --color-text-secondary: #667581;
+    --color-text-primary: #111827;
+    --color-text-secondary: #4B5563;
     --color-text-muted: #94A3B0;
 
     --status-scheduled: #3B82F6;
@@ -65,7 +65,7 @@
   }
 
   .btn-primary {
-    @apply inline-flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-dark transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-brand-button text-white text-sm font-semibold rounded-lg shadow-button hover:brightness-105 transition focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-secondary {
     @apply inline-flex items-center gap-2 px-4 py-2 bg-white text-text-primary text-sm font-medium rounded-lg border border-border hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
@@ -86,7 +86,16 @@
   }
 
   .page-container {
-    @apply p-6 max-w-[1400px] mx-auto;
+    @apply px-4 py-5 sm:px-6 lg:px-7 lg:py-7 max-w-[1440px] mx-auto;
+  }
+
+  /* Rounded white panel used across the product (the cards of the Appointments screen). */
+  .panel {
+    @apply bg-surface rounded-2xl border border-border shadow-card;
+  }
+  /* Square tinted icon tile beside page titles and stat values. */
+  .icon-tile {
+    @apply inline-flex items-center justify-center rounded-xl shrink-0;
   }
 
   .status-badge-scheduled {
@@ -118,19 +127,19 @@
   border-bottom: 1px solid #E1E7EB;
 }
 .rbc-today {
-  background-color: #E6F9F0 !important;
+  background-color: #E8F7EE !important;
 }
 .rbc-event {
-  background-color: #00BF62 !important;
+  background-color: #16A34A !important;
   border: none !important;
   border-radius: 4px !important;
   font-size: 12px !important;
 }
 .rbc-event:focus {
-  outline: 2px solid #008F49;
+  outline: 2px solid #15803D;
 }
 .rbc-slot-selecting {
-  background-color: rgba(0, 191, 98, 0.1);
+  background-color: rgba(22, 163, 74, 0.1);
 }
 .rbc-toolbar button {
   color: #667581;
@@ -143,7 +152,7 @@
   background-color: #F6F8F9;
 }
 .rbc-toolbar button.rbc-active {
-  background-color: #E6F9F0;
-  color: #00BF62;
-  border-color: #00BF62;
+  background-color: #E8F7EE;
+  color: #16A34A;
+  border-color: #16A34A;
 }

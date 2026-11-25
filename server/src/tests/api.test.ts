@@ -591,7 +591,7 @@ describe('Input validation — phone, name, XSS (Issues 4 & 9)', () => {
     const res = await request(app)
       .post('/api/customers')
       .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'Valid Name', email: `phone-ok-${RUN_ID}@example.com`, phone: '+44 20 7946 0958' });
+      .send({ name: 'Valid Name', email: `phone-ok-${RUN_ID}@example.com`, phone: '+44 20 7946 0958', confirmNew: true });
     expect(res.status).toBe(201);
   });
 

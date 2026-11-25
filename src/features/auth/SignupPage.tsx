@@ -165,7 +165,7 @@ export default function SignupPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full mt-1 py-2.5 rounded-lg bg-[#00BF62] hover:bg-[#008F49] text-white text-sm font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[#00BF62] focus:ring-offset-2"
+          className="w-full mt-1 py-2.5 rounded-lg bg-[#16A34A] hover:bg-[#15803D] text-white text-sm font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[#16A34A] focus:ring-offset-2"
         >
           {loading ? 'Creating account…' : 'Create account'}
         </button>
@@ -173,7 +173,7 @@ export default function SignupPage() {
 
       <p className="mt-5 text-center text-sm text-gray-500">
         Already have an account?{' '}
-        <Link to="/login" className="text-[#00BF62] hover:text-[#008F49] font-medium focus:outline-none focus:underline">
+        <Link to="/login" className="text-[#16A34A] hover:text-[#15803D] font-medium focus:outline-none focus:underline">
           Sign in
         </Link>
       </p>
@@ -184,7 +184,7 @@ export default function SignupPage() {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function inputCls(invalid: boolean) {
-  return `w-full px-3 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BF62] focus:border-transparent transition-colors ${
+  return `w-full px-3 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#16A34A] focus:border-transparent transition-colors ${
     invalid ? 'border-red-400 bg-red-50' : 'border-gray-300'
   }`;
 }

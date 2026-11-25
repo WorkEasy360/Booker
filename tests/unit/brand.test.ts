@@ -32,12 +32,12 @@ function pngSize(p: string): { width: number; height: number } {
 }
 
 test('the official identity, spelled once', () => {
-  assert.equal(brand.PRODUCT_NAME, 'WorkeasyBooking');
+  assert.equal(brand.PRODUCT_NAME, 'WorkEasy360 Booking');
   assert.equal(brand.COMPANY_NAME, 'WorkEasy360');
   assert.equal(brand.PRODUCT_ATTRIBUTION, 'A WorkEasy360 Product');
-  assert.equal(brand.PRODUCT_DESCRIPTION, 'Smart appointment scheduling for businesses');
-  assert.equal(brand.POWERED_BY, 'Powered by WorkeasyBooking');
-  assert.deepEqual(brand.BRAND_COLORS, { primary: '#00BF62', secondary: '#008F49', navy: '#13222E', accent: '#FFC940' });
+  assert.equal(brand.PRODUCT_DESCRIPTION, 'Simple Appointment Scheduling for Growing Businesses');
+  assert.equal(brand.POWERED_BY, 'Powered by WorkEasy360 Booking');
+  assert.deepEqual(brand.BRAND_COLORS, { primary: '#16A34A', secondary: '#15803D', navy: '#0B3D35', accent: '#FFC940' });
 });
 
 test('emails use the same identity as the web app', () => {
@@ -57,14 +57,14 @@ test('the Tailwind theme uses the official colours', async () => {
 });
 
 test('browser tab titles: the page, then the product; a business page leads with the business', () => {
-  assert.equal(brand.pageTitle('Dashboard'), 'Dashboard — WorkeasyBooking');
-  assert.equal(brand.pageTitle(), 'WorkeasyBooking — Smart appointment scheduling for businesses');
+  assert.equal(brand.pageTitle('Dashboard'), 'Dashboard — WorkEasy360 Booking');
+  assert.equal(brand.pageTitle(), 'WorkEasy360 Booking — Simple Appointment Scheduling for Growing Businesses');
   assert.equal(brand.pageTitle('   '), brand.pageTitle());
-  assert.equal(brand.businessPageTitle('Glow Studio', 'Booking confirmed'), 'Booking confirmed · Glow Studio — WorkeasyBooking');
-  assert.equal(brand.businessPageTitle('Glow Studio', 'Glow Studio'), 'Glow Studio — WorkeasyBooking');
-  assert.equal(brand.businessPageTitle('Glow Studio'), 'Glow Studio — WorkeasyBooking');
+  assert.equal(brand.businessPageTitle('Glow Studio', 'Booking confirmed'), 'Booking confirmed · Glow Studio — WorkEasy360 Booking');
+  assert.equal(brand.businessPageTitle('Glow Studio', 'Glow Studio'), 'Glow Studio — WorkEasy360 Booking');
+  assert.equal(brand.businessPageTitle('Glow Studio'), 'Glow Studio — WorkEasy360 Booking');
   // Business not known yet: no empty slot, just the page.
-  assert.equal(brand.businessPageTitle(undefined, 'Manage your booking'), 'Manage your booking — WorkeasyBooking');
+  assert.equal(brand.businessPageTitle(undefined, 'Manage your booking'), 'Manage your booking — WorkEasy360 Booking');
   assert.equal(brand.copyrightNotice(2026), '© 2026 WorkEasy360');
 });
 
@@ -76,7 +76,7 @@ test('index.html names the product and points to the official icons', () => {
   assert.equal(meta('apple-mobile-web-app-title'), brand.PRODUCT_NAME);
   assert.equal(meta('og:site_name'), brand.PRODUCT_NAME);
   assert.equal(meta('theme-color'), brand.BRAND_COLORS.navy);
-  assert.match(meta('description') ?? '', /^WorkeasyBooking: smart appointment scheduling for businesses\. A WorkEasy360 Product\.$/);
+  assert.match(meta('description') ?? '', /^WorkEasy360 Booking: simple appointment scheduling for growing businesses\. A WorkEasy360 Product\.$/);
   const icons = [...html.matchAll(/<link rel="(icon|apple-touch-icon)"[^>]*sizes="(\d+)x\d+" href="([^"]+)"/g)];
   assert.equal(icons.length, 3);
   for (const [, , size, href] of icons) {

@@ -13,9 +13,17 @@ import { seal, open } from './seal';
 //
 // Signature header: X-WorkEasy360-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<raw body>")>
 
+// V4 (WorkEasy Connect, 20.4): Appointment Created / Rescheduled / Cancelled / Completed / No-show. A status change also
+// sends appointment.status_changed (kept for receivers set up earlier).
 export const WEBHOOK_EVENTS = [
-  'appointment.created', 'appointment.status_changed', 'appointment.rescheduled', 'appointment.reassigned', 'appointment.deleted',
+  'appointment.created', 'appointment.rescheduled', 'appointment.cancelled', 'appointment.completed', 'appointment.no_show',
+  'appointment.status_changed', 'appointment.reassigned', 'appointment.deleted',
 ] as const;
+
+/** The specific event for a status an appointment moved to, if it has one. */
+export function statusEvent(toStatus: string | null | undefined): 'appointment.cancelled' | 'appointment.completed' | 'appointment.no_show' | null {
+  return toStatus === 'cancelled' ? 'appointment.cancelled' : toStatus === 'completed' ? 'appointment.completed' : toStatus === 'no_show' ? 'appointment.no_show' : null;
+}
 export type WebhookEvent = typeof WEBHOOK_EVENTS[number] | 'ping';
 
 export const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 3_600_000, 6 * 3_600_000];

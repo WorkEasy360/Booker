@@ -1,27 +1,38 @@
+import { z } from 'zod';
 import { zonedToInstant } from './zoned-time';
 
 // Appointment status changes, in one place. "Completed" and "no-show" are outcomes: they can be recorded only once
 // the appointment has started (its date and start time, in the time zone it was booked in). Cancelled appointments
 // can be brought back (the slot is checked again by the caller) but never marked completed or no-show; completed ones
-// can be corrected (back to scheduled or confirmed, or to no-show) but not cancelled.
+// can be corrected (back to scheduled, or to no-show) but not cancelled.
+//
+// V4: only Scheduled / Completed / Cancelled / No-show. New bookings are Scheduled; there is no approval stage. Older
+// clients may still send "confirmed": it is read as "scheduled" (normalizeStatus), and stored rows were migrated.
 
-export const APPOINTMENT_STATUSES = ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show'] as const;
+export const APPOINTMENT_STATUSES = ['scheduled', 'completed', 'cancelled', 'no_show'] as const;
 export type AppointmentStatus = typeof APPOINTMENT_STATUSES[number];
 
 /** Statuses a new appointment may start in. */
-export const INITIAL_STATUSES: AppointmentStatus[] = ['scheduled', 'confirmed'];
+export const INITIAL_STATUSES: AppointmentStatus[] = ['scheduled'];
+
+/** The legacy "confirmed" status is the same as "scheduled". Other values are returned unchanged. */
+export function normalizeStatus<T>(value: T): T | 'scheduled' {
+  return value === 'confirmed' ? 'scheduled' : value;
+}
+
+/** A status sent by a client: one of the four statuses, with "confirmed" accepted as "scheduled". */
+export const StatusInput = z.preprocess(normalizeStatus, z.enum(APPOINTMENT_STATUSES));
 
 const ALLOWED: Record<AppointmentStatus, AppointmentStatus[]> = {
-  scheduled: ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show'],
-  confirmed: ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show'],
-  completed: ['completed', 'scheduled', 'confirmed', 'no_show'],
-  no_show: ['no_show', 'scheduled', 'confirmed', 'completed'],
-  cancelled: ['cancelled', 'scheduled', 'confirmed'],
+  scheduled: ['scheduled', 'completed', 'cancelled', 'no_show'],
+  completed: ['completed', 'scheduled', 'no_show'],
+  no_show: ['no_show', 'scheduled', 'completed'],
+  cancelled: ['cancelled', 'scheduled'],
 };
 const OUTCOMES: AppointmentStatus[] = ['completed', 'no_show'];
 
 const LABEL: Record<AppointmentStatus, string> = {
-  scheduled: 'scheduled', confirmed: 'confirmed', completed: 'completed', cancelled: 'cancelled', no_show: 'a no-show',
+  scheduled: 'scheduled', completed: 'completed', cancelled: 'cancelled', no_show: 'a no-show',
 };
 
 export type StatusProblem = { status: 409; code: 'INVALID_STATUS_CHANGE' | 'APPOINTMENT_NOT_STARTED'; error: string };
@@ -33,7 +44,8 @@ export function statusChangeProblem(
   appointment: { date: string; startTime: string; timezone: string },
   now = Date.now(),
 ): StatusProblem | null {
-  const current = (APPOINTMENT_STATUSES as readonly string[]).includes(from) ? from as AppointmentStatus : 'scheduled';
+  const normalized = normalizeStatus(from);
+  const current = (APPOINTMENT_STATUSES as readonly string[]).includes(normalized) ? normalized as AppointmentStatus : 'scheduled';
   if (!ALLOWED[current].includes(to)) {
     return { status: 409, code: 'INVALID_STATUS_CHANGE', error: `A ${current === 'no_show' ? 'no-show' : current} appointment cannot be marked ${LABEL[to]}.` };
   }

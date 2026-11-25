@@ -43,17 +43,22 @@ export function Badge({ children, variant = 'default', size = 'sm', dot, classNa
   );
 }
 
-const STATUS_BADGES: Record<AppointmentStatus, { variant: BadgeProps['variant']; label: string }> = {
-  scheduled: { variant: 'info',    label: 'Scheduled' },
-  confirmed: { variant: 'primary', label: 'Confirmed' },
-  completed: { variant: 'success', label: 'Completed' },
-  cancelled: { variant: 'danger',  label: 'Cancelled' },
-  no_show:   { variant: 'purple',  label: 'No-show' },
+/** Status pills as in the Appointments screen: soft tinted background, coloured text, slightly rounded. */
+const STATUS_STYLE: Record<AppointmentStatus, string> = {
+  scheduled: 'bg-[#E3EEFF] text-[#2563EB]',
+  completed: 'bg-[#DDF6E5] text-[#15803D]',
+  cancelled: 'bg-[#FDE4E4] text-[#DC2626]',
+  no_show:   'bg-[#F1E8FE] text-[#7C3AED]',
 };
 
-export function StatusBadge({ status }: { status: AppointmentStatus | string }) {
+export function StatusBadge({ status, className }: { status: AppointmentStatus | string; className?: string }) {
   const { t } = useLanguage();
-  const entry = STATUS_BADGES[status as AppointmentStatus];
-  if (!entry) return <Badge variant="default" dot>{status}</Badge>;
-  return <Badge variant={entry.variant} dot>{t(`status.${status as AppointmentStatus}`)}</Badge>;
+  // Earlier records may still say "confirmed": shown as Scheduled (V4 has no separate confirmation stage).
+  const s = status === 'confirmed' ? 'scheduled' : status;
+  const style = STATUS_STYLE[s as AppointmentStatus];
+  return (
+    <span className={cn('inline-flex items-center justify-center px-3 py-1.5 rounded-md text-[13px] sm:text-sm font-medium whitespace-nowrap', style ?? 'bg-gray-100 text-gray-700', className)}>
+      {style ? t(`status.${s as AppointmentStatus}`) : s}
+    </span>
+  );
 }

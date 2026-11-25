@@ -102,7 +102,7 @@ describe('deliveries', () => {
     const { secret, endpoint } = (await addHook(A, ['appointment.created', 'appointment.rescheduled'])).body.data;
     try {
       const booked = await book(A, '10:00');
-      await request(app).put(`/api/appointments/${booked.body.data.id}`).set(A.h).send({ status: 'confirmed' }); // not subscribed
+      await request(app).put(`/api/appointments/${booked.body.data.id}`).set(A.h).send({ internalNotes: 'private' }); // not an event
       await request(app).put(`/api/appointments/${booked.body.data.id}`).set(A.h).send({ startTime: '11:00' });
       await processWebhookDeliveries();
       expect(received.map(r => r.headers['x-workeasy360-event'])).toEqual(['appointment.created', 'appointment.rescheduled']);
@@ -128,12 +128,30 @@ describe('deliveries', () => {
     const booked = await book(A, '13:00');
     db.exec(`CREATE TEMP TRIGGER fail_hook BEFORE INSERT ON webhook_deliveries BEGIN SELECT RAISE(ABORT, 'simulated'); END`);
     try {
-      expect((await request(app).put(`/api/appointments/${booked.body.data.id}`).set(A.h).send({ status: 'confirmed' })).status).toBe(500);
+      expect((await request(app).put(`/api/appointments/${booked.body.data.id}`).set(A.h).send({ status: 'cancelled' })).status).toBe(500);
     } finally {
       db.exec('DROP TRIGGER temp.fail_hook');
       await request(app).delete(`/api/integrations/webhooks/${endpoint.id}`).set(A.h);
     }
     expect((db.prepare('SELECT status FROM appointments WHERE id = ?').get(booked.body.data.id) as { status: string }).status).toBe('scheduled');
+  });
+
+  it('V4 events: a cancellation sends appointment.cancelled (and status_changed); the payload has no notes, contact details or tokens', async () => {
+    const { endpoint } = (await addHook(A, ['appointment.cancelled', 'appointment.status_changed'])).body.data;
+    try {
+      const booked = await book(A, '16:00');
+      await request(app).put(`/api/appointments/${booked.body.data.id}`).set(A.h).send({ internalNotes: 'Secret note' });
+      expect((await request(app).put(`/api/appointments/${booked.body.data.id}`).set(A.h).send({ status: 'cancelled' })).status).toBe(200);
+      await processWebhookDeliveries();
+      const mine = received.filter(r => JSON.parse(r.body).data?.appointment?.id === booked.body.data.id);
+      expect(mine.map(r => r.headers['x-workeasy360-event']).sort()).toEqual(['appointment.cancelled', 'appointment.status_changed']);
+      for (const r of mine) {
+        expect(r.body).not.toMatch(/Secret note|@example\.com|token/i);
+        expect(JSON.parse(r.body).data).toMatchObject({ version: 1, organizationId: A.orgId, appointment: { status: 'cancelled' } });
+      }
+    } finally {
+      await request(app).delete(`/api/integrations/webhooks/${endpoint.id}`).set(A.h);
+    }
   });
 
   it('a failing receiver is retried later; 410 Gone turns the endpoint off; deleting it drops what is pending', async () => {

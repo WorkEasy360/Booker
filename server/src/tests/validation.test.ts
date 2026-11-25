@@ -53,7 +53,7 @@ describe('customers', () => {
   });
 
   it('normalizes a valid phone, and a blank phone clears it', async () => {
-    const created = await request(app).post('/api/customers').set(auth()).send({ name: 'Good Phone', email: `good-phone-${RUN}@example.com`, phone: '98765 43210' });
+    const created = await request(app).post('/api/customers').set(auth()).send({ name: 'Good Phone', email: `good-phone-${RUN}@example.com`, phone: '98765 43210', confirmNew: true });
     expect(created.status).toBe(201);
     expect(created.body.data.phone).toBe('+91 98765 43210');
     const cleared = await request(app).put(`/api/customers/${created.body.data.id}`).set(auth()).send({ phone: '' });

@@ -1,107 +1,62 @@
-# Getting Started with WorkEasy360
+# Getting Started — Guide
 
-## Creating an account (signup)
+## Creating a booking account
 
-1. Go to `/signup` or click **Sign Up** on the login page.
-2. Fill in the signup form:
-   - **Full Name** — your name (required)
-   - **Work Email** — your email address (required, must be valid format)
-   - **Company / Business Name** — your organization name (required)
-   - **Password** — minimum 8 characters, must contain at least one uppercase letter and one number
-   - **Confirm Password** — must match the password field
-3. Click **Create Account**. The page says **Check your email**.
-4. Open the link in the email and click **Confirm my email**. The link works once and expires after 24 hours; the "Check your email" page can send a new one (a new link replaces the previous one).
-5. Sign in at `/login` with your email and password. You are not signed in automatically.
+1. On the sign-in page (`/login`), click **Create Booking Account**.
+2. Enter your **Full name**, **Work email**, **Company / workspace name** and a **Password** (at least 8 characters, with an uppercase letter and a number), then repeat it in **Confirm password**.
+3. Click **Create account**. The page says **Check your email**.
+4. Open the link in the email and click **Confirm my email**. The link works once and expires after 24 hours.
+5. Sign in at `/login` with your email and password.
 
-### Signup validation rules
-- Name: required, cannot be blank
-- Email: must be a valid email format
-- Company: required, cannot be blank
-- Password: at least 8 characters, at least one uppercase letter, at least one number
-- Confirm password: must exactly match the password
+The account belongs to your WorkEasy360 organization. If your business already uses WorkEasy360, sign in with that account instead of creating a new one.
 
-### Signup errors
-- Signing up always answers "We’ll send an email with the next steps if the address can be used for this request." If the address already has an account, the email explains how to sign in or reset the password instead
-- "Email is not set up on this server" — the server administrator must configure email before anyone can sign up
-- "Password must be at least 8 characters"
-- "Password must contain at least one uppercase letter"
-- "Password must contain at least one number"
-- "Passwords do not match"
+## Signing in
 
-## Logging in
+1. Go to the **Booking Login** page (`/login`).
+2. Enter your **Email Address** and **Password**.
+3. Tick **Remember me** to stay signed in on this computer. Leave it unticked on a shared computer: the session then ends when the browser closes.
+4. Click **Log In to Booking**. Appointments opens.
 
-1. Go to `/login`.
-2. Enter your **Email** and **Password**.
-3. Click **Sign In**.
+If two-factor sign-in is on for your account, enter the 6-digit code from your authenticator app, or click **Use a recovery code**, then click **Verify and sign in**.
 
-### Login errors
-- Incorrect email or password → "Invalid email or password"
-- If you forgot your password, reset it (see below).
+## Resetting a forgotten password
 
-## Reset a forgotten password
+1. On the sign-in page, click **Forgot Password?**.
+2. Enter the email address you sign in with and click **Send reset link**.
+3. Open the link in the email. It works once and expires after 60 minutes.
+4. Enter a **New password**, repeat it in **Confirm new password** and click **Save new password**.
+5. Sign in with the new password.
 
-Owners, managers and staff all reset a forgotten password the same way:
+No email? Check the spam folder and use the newest email. Asking again replaces the earlier link.
 
-1. On the sign-in page (`/login`), click **Forgot password?** below the password field.
-2. Enter your email address and click **Send reset link**.
-3. Open the reset link in the email. It works once and expires after 60 minutes; asking again replaces the earlier link.
-4. Choose a new password (at least 8 characters, one uppercase letter, one number) and click **Save new password**.
-5. You are signed out on every device. Sign in with the new password.
+## First-time setup
 
-No email? Check the spam folder and use the newest email. If the page says "Email is not set up on this server", the server administrator must configure email first.
+Use the defaults and keep it short. You can take bookings yourself; add staff only when someone else takes appointments.
 
-## First-time setup after login
+### Step 1: Business details
+1. Go to **Settings → Business Details** (`/settings/business`).
+2. Enter the **Business name**, **Contact email** and **Phone**.
+3. Choose the **Timezone**. Every appointment, reminder and booking page uses it.
+4. Optionally add the **Appointment location or online instructions** that customers see before they confirm.
+5. Click **Save Changes**.
 
-After signing up, complete these steps before accepting bookings:
+### Step 2: Working hours
+1. Open **Availability** (`/availability`).
+2. Switch each day **Open** or **Closed** and set its time ranges.
+3. Click **Save Working Hours**.
 
-### Step 1: Complete your Business Profile
-1. Go to **Settings** → **Business** (`/settings/business`).
-2. Enter your business name, email, phone, website, address, and country.
+### Step 3: A service
+1. Go to **Settings → Services** (`/settings/services`).
+2. Click **Add Service**, enter the **Service name** and **Duration (minutes)**.
 3. Click **Save**.
 
-### Step 2: Set your Working Hours
-1. Go to **Settings** → **Hours** (`/settings/hours`).
-2. Toggle on each day your business is open.
-3. Set the opening and closing times for each active day.
-4. Optionally click **Apply to all active days** to copy one day's hours to all enabled days.
-5. Click **Save Changes**. From then on, staff can only be booked inside these hours.
+### Step 4: Preview and share your booking link
+1. Open **Appointments**. The **Booking Link** card shows your link.
+2. Click **Preview Booking Page** to see what customers see.
+3. Click the copy button next to the link and share it with your customers.
 
-### Step 3: Configure Booking Rules
-1. Go to **Settings** → **Booking** (`/settings/booking`).
-2. Set your default appointment duration, buffer time, minimum booking notice, and advance booking window.
-3. Click **Save**.
+Online booking is switched on or off in **Settings → Public Booking**. No payment gateway or messaging connection is needed to start taking bookings.
 
-### Step 4: Create your first Workspace
-1. Go to **Workspaces** → **New Workspace** (`/workspaces/new`).
-2. Enter the workspace name and details.
-3. Click **Create Workspace**.
+## Signing out (log out)
 
-### Step 5: Create your first Service
-1. Go to **Services** → **New Service** (`/services/new`).
-2. Enter the service name, duration, price, and assign staff.
-3. Click **Create Service**.
-
-### Step 6: Add Staff
-1. Go to **Staff** → **New Staff** (`/staff/new`).
-2. Enter the staff member's name, email, and working hours.
-3. Assign them to workspaces and services.
-4. Click **Create Staff**.
-
-### Step 7: Create a Booking Page
-1. Go to **Booking Pages** → **New Booking Page** (`/booking-pages/new`).
-2. Set a title and URL slug (e.g., "my-clinic" makes the URL `/book/my-clinic`).
-3. Publish the page.
-4. Share the link with your customers.
-
-## Changing your password
-
-1. Go to **Settings** → **Security** (`/settings/security`).
-2. In the **Change Password** section, enter your current password.
-3. Enter and confirm your new password.
-4. Click **Update Password**.
-
-Password requirements: at least 8 characters, one uppercase letter, one number.
-
-## Your user profile
-
-Your current user information is displayed in the sidebar (name, email, role). You can see your role (admin, manager, or staff) but cannot change it from the dashboard — contact your administrator.
+To log out, open the account menu (your name at the top right) and choose **Sign Out**. To sign out on other devices too, use **Sign out other sessions** in **My Account**.

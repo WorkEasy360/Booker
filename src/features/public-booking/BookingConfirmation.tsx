@@ -1,8 +1,8 @@
 import React from 'react';
 import { Link, useParams, useLocation } from 'react-router-dom';
-import { CheckCircle, Calendar, Clock, MapPin, User, Banknote, Mail, Tag } from 'lucide-react';
+import { CheckCircle, Calendar, Clock, MapPin, User, Mail, Tag, Globe2, Phone } from 'lucide-react';
 import type { Service, Staff, Workspace } from '@/types';
-import { formatDate, formatTime, formatCurrency, formatDuration } from '@/lib/utils';
+import { formatDate, formatTime, formatDuration } from '@/lib/utils';
 import { customerEmailMessage, type EmailStatus } from '@/lib/emailStatus';
 import { businessPageTitle } from '@/lib/brand';
 import { usePageTitle } from '@/hooks/usePageTitle';
@@ -29,6 +29,8 @@ interface ConfirmationState {
   emailStatus?: EmailStatus;
   /** The business's time zone: the booking's date and times are in it. */
   timezone?: string;
+  /** Business location or online instructions. */
+  location?: string;
   /** Per channel the customer agreed to: sent, will be sent, or could not be sent. */
   messages?: Partial<Record<'sms' | 'whatsapp', 'sent' | 'queued' | 'not_sent'>>;
 }
@@ -70,8 +72,11 @@ export default function BookingConfirmation() {
     );
   }
 
-  const { bookingRef, manageToken, service, staff, date, slot, customerInfo, workspace, endTime, emailStatus, businessName, themeColor, showLogo, timezone, messages } = state;
-  const emailNote = customerEmailMessage('confirmation', emailStatus, customerInfo.email);
+  const { bookingRef, manageToken, service, staff, date, slot, customerInfo, workspace, endTime, emailStatus, businessName, themeColor, showLogo, timezone, location: placeLine, messages } = state;
+  // Without an email address no email updates can be sent; the page says so (V4 5).
+  const emailNote = customerInfo.email
+    ? customerEmailMessage('confirmation', emailStatus, customerInfo.email)
+    : { tone: 'warning' as const, text: 'No email address was given, so email updates cannot be sent. Please keep your booking reference.' };
   const css = themeCss(themeColor);
 
   const end = endTime ?? addMinutes(slot, service.duration);
@@ -122,10 +127,11 @@ export default function BookingConfirmation() {
         <Row icon={<Calendar className="w-4 h-4" />} label="Date" value={formatDate(date, 'EEEE, MMMM d, yyyy')} />
         <Row icon={<Clock className="w-4 h-4" />} label="Time" value={endTime ? `${formatTime(slot)} – ${formatTime(endTime)}` : formatTime(slot)} />
         {staff && <Row icon={<User className="w-4 h-4" />} label="Provider" value={staff.name} />}
-        {workspace?.address && <Row icon={<MapPin className="w-4 h-4" />} label="Location" value={workspace.address} />}
-        <Row icon={<Banknote className="w-4 h-4" />} label="Price" value={`${formatCurrency(service.price, service.currency)} · pay the business directly`} />
+        {timezone && <Row icon={<Globe2 className="w-4 h-4" />} label="Timezone" value={timezone} />}
+        {(placeLine || workspace?.address) && <Row icon={<MapPin className="w-4 h-4" />} label="Location" value={placeLine || workspace!.address!} />}
         <Row icon={<User className="w-4 h-4" />} label="Name" value={customerInfo.name} />
-        <Row icon={<Mail className="w-4 h-4" />} label="Email" value={customerInfo.email} />
+        {customerInfo.email && <Row icon={<Mail className="w-4 h-4" />} label="Email" value={customerInfo.email} />}
+        {customerInfo.phone && <Row icon={<Phone className="w-4 h-4" />} label="Phone" value={customerInfo.phone} />}
       </div>
 
       <AddToCalendar event={calendarEvent} manageToken={manageToken} />
@@ -151,7 +157,7 @@ export default function BookingConfirmation() {
       <div className="flex items-center gap-2 text-xs text-text-muted bg-muted rounded-lg p-3">
         <Mail className="w-3.5 h-3.5 shrink-0" />
         <span>
-          Save your booking reference <strong className="text-text-secondary">{bookingRef}</strong>. To manage or cancel later, use the link in your confirmation email, or this reference with your email address.
+          Save your booking reference <strong className="text-text-secondary">{bookingRef}</strong>. {customerInfo.email ? 'To manage or cancel later, use the link in your confirmation email, or this reference with your email address.' : 'To manage or cancel later, use “Manage your booking” above now, or contact the business.'}
         </span>
       </div>
     </div>

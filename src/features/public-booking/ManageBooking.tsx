@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams, useLocation, useNavigate, Link } from 'react-router-dom';
-import { Search, Calendar, Clock, X, Check, ChevronLeft, HelpCircle, User, Tag, Banknote, ShieldCheck } from 'lucide-react';
+import { Search, Calendar, Clock, X, Check, ChevronLeft, HelpCircle, User, Tag, ShieldCheck, Globe2, MapPin, Phone, Mail } from 'lucide-react';
 import { publicApi, ApiError, type ManagedBooking } from '@/api/client';
 import { AvailabilityCalendar } from './AvailabilityCalendar';
 import { customerEmailMessage, type EmailStatus } from '@/lib/emailStatus';
-import { formatDate, formatTime, formatDuration, formatCurrency, cn } from '@/lib/utils';
+import { formatDate, formatTime, formatDuration, cn } from '@/lib/utils';
 import { useToast, ConfirmModal, StatusBadge, Avatar } from '@/components/ui';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { businessPageTitle } from '@/lib/brand';
@@ -409,9 +409,10 @@ export default function ManageBooking() {
             <>
               <DetailRow icon={<Tag className="w-4 h-4" />} label={t('field.service')} value={appointment.serviceName} />
               <DetailRow icon={<Clock className="w-4 h-4" />} label={t('field.duration')} value={formatDuration(appointment.duration)} />
-              <DetailRow icon={<Banknote className="w-4 h-4" />} label={t('field.price')} value={formatCurrency(appointment.price, appointment.currency)} />
               <DetailRow icon={<Calendar className="w-4 h-4" />} label={t('field.date')} value={longDate(appointment.date, lang)} />
               <DetailRow icon={<Clock className="w-4 h-4" />} label={t('field.time')} value={`${formatTime(appointment.startTime)} – ${formatTime(appointment.endTime)}`} />
+              {appointment.timezone && <DetailRow icon={<Globe2 className="w-4 h-4" />} label={t('field.timezone')} value={appointment.timezone} />}
+              {appointment.location && <DetailRow icon={<MapPin className="w-4 h-4" />} label={t('field.location')} value={appointment.location} />}
               {appointment.staffName && (
                 <div className="flex items-center justify-between px-5 py-3">
                   <div className="flex items-center gap-2 text-sm text-text-secondary">
@@ -443,6 +444,18 @@ export default function ManageBooking() {
         <p className="mb-8 text-sm text-text-secondary bg-muted rounded-lg p-3">
           {t('manage.started')}
         </p>
+      ) : isActive && appointment?.canChange === false ? (
+        <div className="mb-8 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" data-cutoff>
+          <p className="font-semibold">Online changes are closed for this booking</p>
+          <p className="mt-1">
+            {appointment.cutoffHours ? `Bookings can be changed online up to ${appointment.cutoffHours} hour${appointment.cutoffHours === 1 ? '' : 's'} before the start. ` : ''}
+            Please contact {appointment.business.name} to reschedule or cancel.
+          </p>
+          <div className="mt-2 space-y-1">
+            {appointment.business.phone && <a href={`tel:${appointment.business.phone}`} className="flex items-center gap-2 font-medium"><Phone className="w-4 h-4" />{appointment.business.phone}</a>}
+            {appointment.business.email && <a href={`mailto:${appointment.business.email}`} className="flex items-center gap-2 font-medium"><Mail className="w-4 h-4" />{appointment.business.email}</a>}
+          </div>
+        </div>
       ) : isActive ? (
         <div className="flex flex-col gap-2 mb-8">
           <button

@@ -19,7 +19,8 @@
     "email:test": "tsx scripts/email-test.ts",
     "mail:catcher": "node scripts/mail-catcher.mjs",
     "test:email": "node scripts/email-flows.mjs",
-    "test:smoke": "node scripts/smoke-production.mjs"
+    "test:smoke": "node scripts/smoke-production.mjs",
+    "demo": "tsx src/db/demo-clinic.ts"
   },
   "dependencies": {
     "@types/cookie-parser": "^1.4.10",

@@ -9,7 +9,7 @@ import { mediaStorage } from './storage';
 // file is. Replacing an image removes the old file once the new one is saved. Images are served publicly by their
 // random id (they appear on public booking pages), never by name or path.
 
-export type MediaKind = 'logo' | 'staff_photo';
+export type MediaKind = 'logo' | 'staff_photo' | 'user_photo';
 
 export interface MediaRow {
   id: string; organization_id: string; kind: MediaKind; owner_id: string; storage: string; storage_key: string;
@@ -30,6 +30,17 @@ export function currentMedia(orgId: string, kind: MediaKind, ownerId: string): M
 export function staffPhotoUrls(orgId: string): Map<string, string> {
   const rows = db.prepare("SELECT id, owner_id FROM media_files WHERE organization_id = ? AND kind = 'staff_photo'").all(orgId) as Array<{ id: string; owner_id: string }>;
   return new Map(rows.map(r => [r.owner_id, mediaUrl(r.id)]));
+}
+
+/**
+ * The photo shown for a signed-in person: their own profile photo, otherwise the photo of the staff record their
+ * sign-in belongs to, otherwise null (initials are shown).
+ */
+export function userPhotoUrl(orgId: string, userId: string, staffId?: string | null): string | null {
+  const own = currentMedia(orgId, 'user_photo', userId);
+  if (own) return mediaUrl(own.id);
+  const staff = staffId ? currentMedia(orgId, 'staff_photo', staffId) : undefined;
+  return staff ? mediaUrl(staff.id) : null;
 }
 
 export type SaveResult = { ok: true; media: ReturnType<typeof publicMedia> } | { ok: false; status: number; error: string; code: string };

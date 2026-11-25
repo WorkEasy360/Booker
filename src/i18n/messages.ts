@@ -23,7 +23,7 @@ const en = {
   'time.noneLeft': 'No times are free on {date} any more.', 'time.noneLeftHint': 'Someone may have just booked the last slot. Go back and choose another date.',
   'info.title': 'Your Information', 'info.name': 'Full Name', 'info.email': 'Email Address', 'info.phone': 'Phone Number', 'info.optional': '(optional)',
   'info.namePlaceholder': 'Jane Smith',
-  'info.nameRequired': 'Enter your name.', 'info.emailRequired': 'Enter your email address.', 'info.phoneRequired': 'Enter your phone number.',
+  'info.contactHint': 'Give a phone number or an email address (at least one).', 'info.contactRequired': 'Enter a phone number or an email address.', 'field.timezone': 'Timezone', 'field.location': 'Location', 'block.contact': 'Enter a phone number or an email address to continue.', 'info.nameRequired': 'Enter your name.', 'info.emailRequired': 'Enter your email address.', 'info.phoneRequired': 'Enter your phone number.',
   'info.summary': 'Summary', 'info.payDirectly': 'Online payment is not available. Pay the business directly.',
   // Text-message consent, add to calendar, message status after booking
   'consent.title': 'Booking updates by message', 'consent.sms': 'Text me booking updates (SMS)', 'consent.whatsapp': 'Send me booking updates on WhatsApp',
@@ -72,11 +72,11 @@ const en = {
   'menu.dashboard': 'Dashboard', 'menu.mySpace': 'My Space', 'menu.appointments': 'Appointments', 'menu.calendar': 'Calendar',
   'menu.workspaces': 'Workspaces', 'menu.services': 'Services', 'menu.staff': 'Staff', 'menu.resources': 'Resources',
   'menu.customers': 'Customers', 'menu.bookingPages': 'Booking Pages', 'menu.notifications': 'Notifications',
-  'menu.integrations': 'Integrations', 'menu.reports': 'Reports', 'menu.settings': 'Settings', 'menu.signOut': 'Sign Out',
+  'menu.integrations': 'Integrations', 'menu.reports': 'Reports', 'menu.settings': 'Settings', 'menu.signOut': 'Sign Out', 'menu.availability': 'Availability',
   // Sign-in
-  'login.title': 'Welcome back', 'login.subtitle': 'Sign in to {product}', 'login.email': 'Email', 'login.password': 'Password',
-  'login.forgot': 'Forgot password?', 'login.submit': 'Sign in', 'login.submitting': 'Signing in…',
-  'login.required': 'Email and password are required.', 'login.noAccount': "Don't have an account?", 'login.create': 'Create account',
+  'login.title': 'Booking Login', 'login.subtitle': 'Sign in to access your booking workspace and manage appointments, availability and customer bookings.', 'login.email': 'Email Address', 'login.password': 'Password',
+  'login.forgot': 'Forgot Password?', 'login.submit': 'Log In to Booking', 'login.submitting': 'Logging in…',
+  'login.required': 'Email and password are required.', 'login.noAccount': "Don't have an account?", 'login.create': 'Create Booking Account',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -95,7 +95,7 @@ const hi: Record<MessageKey, string> = {
   'time.noneLeft': '{date} को अब कोई समय ख़ाली नहीं है।', 'time.noneLeftHint': 'शायद किसी ने अभी-अभी आख़िरी समय बुक कर लिया। वापस जाकर कोई दूसरी तारीख़ चुनें।',
   'info.title': 'आपकी जानकारी', 'info.name': 'पूरा नाम', 'info.email': 'ईमेल पता', 'info.phone': 'फ़ोन नंबर', 'info.optional': '(वैकल्पिक)',
   'info.namePlaceholder': 'प्रिया शर्मा',
-  'info.nameRequired': 'अपना नाम लिखें।', 'info.emailRequired': 'अपना ईमेल पता लिखें।', 'info.phoneRequired': 'अपना फ़ोन नंबर लिखें।',
+  'info.contactHint': 'फ़ोन नंबर या ईमेल पता दें (कम से कम एक)।', 'info.contactRequired': 'फ़ोन नंबर या ईमेल पता लिखें।', 'field.timezone': 'समय क्षेत्र', 'field.location': 'स्थान', 'block.contact': 'आगे बढ़ने के लिए फ़ोन नंबर या ईमेल पता लिखें।', 'info.nameRequired': 'अपना नाम लिखें।', 'info.emailRequired': 'अपना ईमेल पता लिखें।', 'info.phoneRequired': 'अपना फ़ोन नंबर लिखें।',
   'info.summary': 'सारांश', 'info.payDirectly': 'ऑनलाइन भुगतान उपलब्ध नहीं है। भुगतान सीधे व्यवसाय को करें।',
   'consent.title': 'मैसेज से बुकिंग अपडेट', 'consent.sms': 'मुझे बुकिंग अपडेट SMS से भेजें', 'consent.whatsapp': 'मुझे बुकिंग अपडेट WhatsApp पर भेजें',
   'consent.hint': 'वैकल्पिक। पुष्टि हमेशा ईमेल से आती है। मैसेज बंद करने के लिए किसी भी मैसेज के जवाब में STOP लिखें।',
@@ -139,10 +139,10 @@ const hi: Record<MessageKey, string> = {
   'menu.dashboard': 'डैशबोर्ड', 'menu.mySpace': 'मेरा स्थान', 'menu.appointments': 'अपॉइंटमेंट', 'menu.calendar': 'कैलेंडर',
   'menu.workspaces': 'कार्यस्थल', 'menu.services': 'सेवाएँ', 'menu.staff': 'स्टाफ़', 'menu.resources': 'संसाधन',
   'menu.customers': 'ग्राहक', 'menu.bookingPages': 'बुकिंग पेज', 'menu.notifications': 'सूचनाएँ',
-  'menu.integrations': 'इंटीग्रेशन', 'menu.reports': 'रिपोर्ट', 'menu.settings': 'सेटिंग्स', 'menu.signOut': 'साइन आउट',
-  'login.title': 'फिर से स्वागत है', 'login.subtitle': '{product} में साइन इन करें', 'login.email': 'ईमेल', 'login.password': 'पासवर्ड',
+  'menu.integrations': 'इंटीग्रेशन', 'menu.reports': 'रिपोर्ट', 'menu.settings': 'सेटिंग्स', 'menu.signOut': 'साइन आउट', 'menu.availability': 'उपलब्धता',
+  'login.title': 'बुकिंग लॉगिन', 'login.subtitle': 'अपने बुकिंग वर्कस्पेस में साइन इन करें और अपॉइंटमेंट, उपलब्धता और ग्राहक बुकिंग प्रबंधित करें।', 'login.email': 'ईमेल', 'login.password': 'पासवर्ड',
   'login.forgot': 'पासवर्ड भूल गए?', 'login.submit': 'साइन इन करें', 'login.submitting': 'साइन इन हो रहा है…',
-  'login.required': 'ईमेल और पासवर्ड ज़रूरी हैं।', 'login.noAccount': 'खाता नहीं है?', 'login.create': 'खाता बनाएँ',
+  'login.required': 'ईमेल और पासवर्ड ज़रूरी हैं।', 'login.noAccount': 'खाता नहीं है?', 'login.create': 'बुकिंग खाता बनाएँ',
 };
 
 export const MESSAGES: Record<Language, Record<MessageKey, string>> = { en, hi };

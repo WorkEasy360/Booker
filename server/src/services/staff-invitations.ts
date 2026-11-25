@@ -10,7 +10,8 @@ import { disableTwoFactor } from './two-factor';
 // single-use, expire after 72 hours, and a newer invitation replaces older ones for the same person.
 
 export const INVITE_TTL_MS = 72 * 60 * 60_000;
-export type InviteRole = 'staff' | 'manager';
+/** Sign-in access a staff member is invited with; 'admin' is shown as "Owner" (manages the whole business). */
+export type InviteRole = 'staff' | 'manager' | 'admin';
 export type InvitationStatus = 'pending' | 'accepted' | 'expired' | 'revoked';
 
 export function hashInviteToken(token: string): string {

@@ -1,68 +1,65 @@
-# WorkEasy360 Platform Overview
+# WorkEasy360 Booking — Overview
 
-## What is WorkEasy360?
+## What is WorkEasy360 Booking?
 
-WorkEasy360 is a web-based appointment scheduling and business management platform. It lets service businesses manage bookings, staff, services, customers, workspaces, and resources from a single dashboard. Customers can book appointments online through public booking pages without needing an account.
+WorkEasy360 Booking is simple appointment scheduling for growing businesses. You share one booking link, set when you and your team can be booked, create or reschedule appointments, keep basic customer details and send simple notifications. It is a product of WorkEasy360 and uses your WorkEasy360 sign-in, organization, plan and support.
 
-## Who can use WorkEasy360?
+Customers book through your booking link without creating an account or paying online.
 
-- **Business owners / admins** — full access to all features via the dashboard
-- **Managers** — manage appointments, staff, services (no billing/org settings)
-- **Staff** — view their own appointments and schedule
-- **Public customers** — book appointments via a public booking link, no login required
+## The four main menus
 
-## How to access the dashboard
+The menu on the left has exactly four items. Appointments opens first after you sign in.
 
-1. Go to the application URL.
-2. Click **Login** or visit `/login`.
-3. Enter your email address and password.
-4. You will be redirected to the **Dashboard** at `/dashboard`.
-
-If you don't have an account, go to `/signup` to create one. Signup creates both your user account and your organization once you confirm the link emailed to you; then sign in.
-
-## Main sections of WorkEasy360
-
-| Section | URL | Purpose |
+| Menu | Address | What it is for |
 |---|---|---|
-| Dashboard | /dashboard | Overview of today's appointments and key metrics |
-| My Space | /my-space | Your personal schedule and upcoming bookings |
-| Appointments | /appointments | Full appointment list with filters |
-| Calendar | /calendar | Visual calendar view of all appointments |
-| Services | /services | Manage bookable service offerings |
-| Staff | /staff | Manage team members and their schedules |
-| Workspaces | /workspaces | Manage physical locations or branches |
-| Resources | /resources | Manage rooms, equipment, and other bookable assets |
-| Customers | /customers | Customer database with booking history |
-| Booking Pages | /booking-pages | Public booking page builder |
-| Reports | /reports | Analytics and performance metrics |
-| Notifications | /notifications | Configure notification settings |
-| Integrations | /integrations | Third-party integrations |
-| Settings | /settings | Business profile and preferences |
+| Appointments | `/appointments` | Today's, upcoming and past appointments, the calendar view, new appointments, your booking link and quick actions |
+| Availability | `/availability` | Business and staff working hours, breaks, and date exceptions (holidays, blocked time, different hours) |
+| Customers | `/customers` | Customer list, contact details and appointment history |
+| Settings | `/settings` | Business Details, Services, Notifications, Public Booking, Team, Internal Automation and Integrations |
 
-## Navigation
+On a phone, open the menu with the menu button at the top left.
 
-The left sidebar contains all main navigation links. On mobile, use the hamburger menu icon in the top-left to open the sidebar drawer. The sidebar collapses to icon-only mode on desktop using the arrow button at the bottom.
+## The top bar
 
-## Key concepts
+- **Organization** (left): the business you are working in. Records and balances are kept separate for each organization.
+- **Search** (magnifying glass): find customers and appointments by customer name or phone.
+- **Notifications** (bell): today's appointments. A red dot shows until you open it.
+- **Help** (question mark): the WorkEasy360 Unified Helpdesk, and the AI Assistant.
+- **Your name and role**: the account menu with My Account, Plan & Billing, Wallets & Usage, Help and Sign Out.
 
-- **Workspace** — a physical location or branch of your business (e.g., "Downtown Clinic", "East Branch")
-- **Service** — a bookable offering (e.g., "30-min Consultation", "Yoga Class")
-- **Staff** — a team member who provides services and has a bookable schedule
-- **Resource** — a room, equipment item, or other asset that gets reserved when an appointment is booked
-- **Customer** — a person who has made at least one booking
-- **Booking Page** — a public URL that customers can use to self-book appointments
-- **Booking Reference** — a unique ID for each appointment, formatted as WE-XXXXXXXX (e.g., WE-ABC12345)
+The AI Assistant is the round button at the bottom right of the screen.
 
-## Getting started checklist
+## Key ideas
 
-1. Complete your **Business Profile** in Settings → Business
-2. Set your **Working Hours** in Settings → Hours
-3. Create at least one **Workspace** (your location)
-4. Create at least one **Service** (what you offer)
-5. Add **Staff** members and assign them to services
-6. Create a **Booking Page** and publish it
-7. Share your booking page link with customers
+- **Appointment**: a booking of one service with one provider at a date and time. It is Scheduled, Completed, Cancelled or No-show.
+- **Service**: what customers can book, with a name and a duration (Settings → Services).
+- **Provider (team member)**: a person who takes appointments (Settings → Team). Customers choose a provider only when more than one can do the service.
+- **Customer**: a person who books. A customer needs a name and a phone number or an email address.
+- **Availability**: when the business is open and when each provider works, plus date exceptions.
+- **Booking link**: the one public page where customers book, at `/book/` followed by your business's address.
+- **Booking reference**: a code such as WE-1A2B3C4D that identifies an appointment. Customers use it to find their booking.
+- **Business timezone**: one timezone for the whole business. Every appointment, reminder and booking page uses it.
 
-## System requirements
+## What happened to the Dashboard, Calendar, Reports and other old screens
 
-WorkEasy360 runs in any modern web browser. No mobile app is required. Internet connection is needed to access the dashboard.
+Earlier versions had a Dashboard, My Space, a separate Calendar menu, Workspaces, Resources, several Booking Pages and Reports. They are not part of WorkEasy360 Booking:
+
+- Dashboard and My Space: use **Appointments** (`/appointments`), which shows today's figures and opens first.
+- Calendar menu: use the **Calendar** view inside Appointments.
+- Booking Pages: there is one booking link, managed in **Settings → Public Booking**.
+- Services and Staff menus: they are now **Settings → Services** and **Settings → Team**.
+- Workspaces, Resources and Reports: not available. See Known Limitations.
+
+Old bookmarks still open the right place: the old Dashboard, Calendar, Services, Staff, Booking Pages, Notifications and Integrations addresses open the screens above.
+
+## Getting started in five steps
+
+1. Enter your business name and timezone in **Settings → Business Details**.
+2. Set your working hours in **Availability**.
+3. Add a service and its duration in **Settings → Services**.
+4. Preview your booking page from the **Booking Link** card on Appointments.
+5. Copy the link and share it with your customers.
+
+## Requirements
+
+WorkEasy360 Booking runs in any modern browser on a computer, tablet or phone. Customers can book from a phone browser without installing anything.

@@ -1,136 +1,104 @@
-# Appointments — Complete Guide
+# Appointments — Guide
 
-## What are appointments?
+Appointments (`/appointments`) is the first screen after you sign in. It shows today's figures, the appointment list, your booking link and quick actions. Owners and managers see every appointment; staff see only their own.
 
-Appointments are bookings that record a specific date, time, service, staff member, and customer. Every appointment has a unique booking reference starting with WE- (e.g., WE-ABC12345).
+## The Appointments screen
 
-## Viewing appointments
+- **Figures** at the top: Today's Appointments (compared with the same day last week), Upcoming, Completed this week, Cancelled this week and Total Customers.
+- **List** with the tabs **Today**, **Upcoming** and **Past**. The arrows and the date button show another day. The search button finds appointments by customer name or phone.
+- **Status filter**: click the **Status** column heading to show only Scheduled, Completed, Cancelled or No-show appointments.
+- **Booking Link** card: copy your link or click **Preview Booking Page**.
+- **Quick Actions**: Create New Appointment, Manage Availability, View Customers and Booking Settings.
+- **List** and **Calendar** buttons at the top switch between the list and the calendar view.
 
-Go to **Appointments** (`/appointments`) to see all appointments. You can filter by:
-- **Date** — filter to a specific day
-- **Staff** — filter by a staff member
-- **Status** — filter by appointment status (scheduled, confirmed, completed, cancelled, no-show)
-- **Customer** — filter by customer
+## Creating an appointment
 
-Go to **Calendar** (`/calendar`) for a visual day/week/month view of all appointments.
+1. On Appointments, click **New Appointment** (`/appointments/new`).
+2. In **Customer**, search by name, phone or email and choose the customer, or click **New customer** to add one.
+3. In **Service and time**, choose the **Service** and, when more than one person offers it, the **Staff** member.
+4. Choose the **Date**. Only free times are listed under **Available times**.
+5. Click a time. If the day is full, click **Try next day**.
+6. Optionally write an **Internal note**. It is never shown to the customer.
+7. Check the **Review and save** summary and click **Save Appointment**.
 
-## Appointment statuses
+The new appointment is Scheduled. The customer gets a booking confirmation by email when they have an email address, and by SMS or WhatsApp when those channels are on.
 
-| Status | Meaning |
-|---|---|
-| scheduled | Appointment has been booked but not confirmed |
-| confirmed | Appointment confirmed by the business |
-| completed | Appointment took place |
-| cancelled | Appointment was cancelled |
-| no_show | Customer did not show up |
+## Viewing the calendar
 
-## Creating a new appointment (dashboard)
-
-1. Go to **Appointments** → **New Appointment** (`/appointments/new`) or click the **+ New Appointment** button.
-2. **Service & Staff card:**
-   - Select a **Service** from the dropdown (shows active services with duration and price)
-   - Select a **Staff Member** (options are filtered to staff assigned to the chosen service)
-3. **Date & Time card:**
-   - Pick a **Date** (cannot be in the past)
-   - Choose a **Time Slot** (only the free start times for that staff member and date are shown)
-   - The calculated end time is shown automatically based on service duration
-4. **Customer card:**
-   - Select an existing customer from the dropdown, OR
-   - Choose **Add new customer** and fill in:
-     - Full Name (required)
-     - Email (required)
-     - Phone (optional)
-5. **Details card (optional):**
-   - Location — auto-filled from service, can be changed
-   - Customer-facing notes — visible to the customer in their confirmation
-   - Internal notes — private notes for staff only
-6. Click **Create Appointment**.
-
-### Appointment creation errors
-- "Please fill in service, staff, date, and time." — one of the required fields is missing
-- "Appointments cannot be created in the past." — the selected date is before today
-- "Please select or add a customer." — no customer selected
-- "Please provide at least a name and email for the new customer." — new customer form incomplete
-
-### Server-side business rules
-- Date cannot be before today's date (server-enforced)
-- The end time is always computed from the service duration — you cannot manually set it
-- If the time slot is already taken by the same staff member, you get: "This time slot is no longer available. Please choose another time."
-- Price, currency, and location are taken from the service record automatically
+The **Calendar** view (`/appointments?view=calendar`) shows appointments by **Day** or **Week** (Day only on phones). Use the arrows to move, **Today** to come back, and click an appointment to open it. Click an empty hour to start a new appointment at that time. There is no separate Calendar menu: the calendar is part of Appointments.
 
 ## Rescheduling an appointment
 
-1. Open the appointment details page (`/appointments/:id`).
+1. Open the appointment from the list or the calendar.
 2. Click **Reschedule**.
-3. Select a new date and time.
-4. Confirm the reschedule.
+3. Choose a new **Date** and click one of the **Available times**.
+4. Click **Confirm New Time**.
 
-Reschedule rules:
-- Cannot reschedule to a date in the past
-- Only the free start times for that date are offered: the same times a new booking could use (working hours,
-  business hours, breaks, time off, closures, other appointments and the service's buffer times)
+The same appointment moves to the new time and keeps its booking reference. The customer gets a reschedule update and the reminder is replaced. Only Scheduled appointments can be rescheduled, and never to a date in the past.
 
 ## Cancelling an appointment
 
 1. Open the appointment.
-2. Click **Cancel Appointment**.
-3. Confirm cancellation.
+2. Click **Cancel**.
+3. In the **Cancel appointment?** window, click **Cancel Appointment**. Click **Keep It** to leave it as it is.
 
-## Checking available time slots, and why a time slot is not available
+The time becomes free again, the reminder stops and the customer gets a cancellation update. The appointment stays in the history as Cancelled; appointments are never deleted.
 
-Available times appear in the **New Appointment** form (`/appointments/new`) after you choose a service, staff member and date, and on public booking pages. There is no separate availability screen. API clients can call `/api/appointments/availability` with `date` (YYYY-MM-DD), `serviceId` and `staffId`.
+## Editing an appointment
 
-A time slot is not available when:
-- it is outside the staff member's working hours, or the staff member does not work that day
-- it is outside the business hours saved in Settings → Working Hours, or the business is closed that day
-- it overlaps a weekly break, the staff member's time off, or a business closure
-- it overlaps another appointment of the same staff member, including the service's buffer times
-- for public bookings only: it is too soon (minimum notice), too far ahead (advance booking window), same-day booking is off, or the time has passed
+1. Open the appointment and click **Edit**.
+2. Change the staff member, date, time or internal note.
+3. Click **Save Changes**.
 
-## Appointment booking reference
+The customer and the service of an existing appointment cannot be changed. To book a different service, cancel the appointment and create a new one.
 
-Every appointment gets a unique booking reference formatted as **WE-XXXXXXXX** (e.g., WE-8328PTT8). Customers can use this reference to look up and manage their booking at `/book/:slug/manage`.
+## Marking an appointment completed or no-show
 
-## Appointment fields (full list)
+1. Open the appointment after its start time.
+2. Click **Complete** when the customer came, or **Mark No-show** when they did not.
 
-| Field | Description |
-|---|---|
-| Service | Which service is being provided |
-| Staff | Which staff member will provide the service |
-| Customer | Who the appointment is for |
-| Date | The appointment date (YYYY-MM-DD) |
-| Start Time | When the appointment begins (HH:MM) |
-| End Time | Calculated automatically from service duration |
-| Duration | Taken from the service's duration setting |
-| Status | Current status (see status table above) |
-| Location | Where the appointment takes place |
-| Notes | Customer-visible notes |
-| Internal Notes | Staff-only notes |
-| Booking Reference | Unique ID starting with WE- |
-| Price | Taken from the service price |
-| Workspace | Optional location/branch assignment |
+Complete and Mark No-show become available after the start time, and only for Scheduled appointments.
 
-## Conflict detection
+## Completing several appointments at once
 
-The system prevents double-booking a staff member. If you try to book a slot where the same staff member already has a non-cancelled appointment at the same date and overlapping time, the booking will be rejected with: "This time slot is no longer available."
+1. On Appointments, tick the appointments in the list.
+2. At the bottom, click **Complete** or **Mark No-show**. The number in brackets shows how many can be updated.
+3. Click **Clear** to untick them.
 
-Two appointments at exactly the same start time for different staff members are allowed.
+Only Scheduled appointments whose start time has passed are updated.
 
-## Finding an appointment by booking reference
+## Filtering appointments by status or searching
 
-From the public booking page: go to `/book/:slug/manage`, enter the booking reference (e.g., WE-ABC12345).
+1. On Appointments, choose the **Today**, **Upcoming** or **Past** tab.
+2. Click the **Status** column heading and choose Scheduled, Completed, Cancelled or No-show.
+3. Click the search button and type a customer name, phone number or booking reference.
 
-From the dashboard: use the search or filter in the Appointments list, or search by customer.
+## Adding an internal note to an appointment
 
-## Appointment API endpoints
+1. Open the appointment.
+2. Under **Internal note**, write the note.
+3. Click **Save note**.
 
-| Action | Method | URL |
-|---|---|---|
-| List appointments | GET | /api/appointments |
-| Get one appointment | GET | /api/appointments/:id |
-| Create appointment | POST | /api/appointments |
-| Update appointment | PUT | /api/appointments/:id |
-| Delete appointment | DELETE | /api/appointments/:id |
-| Check availability | GET | /api/appointments/availability |
+The note is private: it is never shown to the customer or included in messages.
 
-All endpoints require authentication (Bearer token).
+## Appointment statuses
+
+- **Scheduled**: booked and coming up (every new appointment starts here).
+- **Completed**: the appointment took place.
+- **Cancelled**: cancelled by the business or by the customer; the time is free again.
+- **No-show**: the customer did not come.
+
+Only Scheduled appointments can be edited, rescheduled or cancelled.
+
+## The appointment details page
+
+Each appointment shows its date, time, service, staff member, customer, booking reference (for example WE-1A2B3C4D), timezone and location. It also shows:
+
+- **Internal note**: write a private note and click **Save note**. It is never shown to the customer or included in messages.
+- **Customer Emails**: which booking emails were sent, with a button to resend the confirmation or the cancellation.
+- **Notifications**: SMS and WhatsApp messages and their delivery, with **Retry** for failed ones.
+- **History**: who created, moved or changed the appointment and when. It cannot be edited.
+
+## Double bookings and past times
+
+A staff member cannot have two appointments at the same time, and times outside working hours, breaks and blocked dates are never offered. Appointments cannot be created in the past. If a time was taken while you were choosing, the message **That time slot is no longer available** appears: choose another time.

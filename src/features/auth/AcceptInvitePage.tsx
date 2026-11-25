@@ -6,7 +6,7 @@ import { authApi, type InvitationPreview } from '@/api/client';
 import { homePath } from '@/lib/permissions';
 import AuthLayout from './AuthLayout';
 
-const INPUT = 'w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00BF62] focus:border-transparent transition-colors';
+const INPUT = 'w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#16A34A] focus:border-transparent transition-colors';
 
 // The invitation link carries its token in the fragment (#token=…), which browsers never send to servers.
 // The token is the proof that this person controls the invited email address.
@@ -57,7 +57,7 @@ export default function AcceptInvitePage() {
           You are signed in as <strong>{user.email}</strong>. Sign out first, then open the invitation link again to create the new sign-in.
         </p>
         <div className="flex gap-2">
-          <button type="button" onClick={() => logout()} className="flex-1 py-2.5 rounded-lg bg-[#00BF62] text-white text-sm font-semibold">Sign out</button>
+          <button type="button" onClick={() => logout()} className="flex-1 py-2.5 rounded-lg bg-[#16A34A] text-white text-sm font-semibold">Sign out</button>
           <Link to={homePath(user.permissions)} className="flex-1 py-2.5 rounded-lg border border-gray-300 text-sm font-medium text-center text-gray-700">Back to my account</Link>
         </div>
       </AuthLayout>
@@ -71,7 +71,7 @@ export default function AcceptInvitePage() {
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
           <span>{loadError}</span>
         </div>
-        <Link to="/login" className="block text-center text-sm font-medium text-[#00BF62]">Go to sign in</Link>
+        <Link to="/login" className="block text-center text-sm font-medium text-[#16A34A]">Go to sign in</Link>
       </AuthLayout>
     );
   }
@@ -112,7 +112,7 @@ export default function AcceptInvitePage() {
             onChange={e => setConfirm(e.target.value)} className={INPUT} />
         </div>
         <button type="submit" disabled={saving}
-          className="w-full py-2.5 rounded-lg bg-[#00BF62] hover:bg-[#00a855] text-white text-sm font-semibold transition-colors disabled:opacity-60">
+          className="w-full py-2.5 rounded-lg bg-[#16A34A] hover:bg-[#00a855] text-white text-sm font-semibold transition-colors disabled:opacity-60">
           {saving ? 'Creating your sign-in…' : 'Create my sign-in'}
         </button>
         <p className="text-xs text-gray-500 text-center">

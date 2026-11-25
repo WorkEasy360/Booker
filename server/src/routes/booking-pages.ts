@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import db from '../db/init';
 import { requireAuth, requirePermission, type AuthRequest } from '../middleware/auth';
+import { ensureDefaultBookingPage, setOnlineBooking } from '../services/default-booking-page';
 
 const router = Router();
 router.use(requireAuth);
@@ -73,6 +74,7 @@ function rowToPage(row: Record<string, unknown>) {
     theme: JSON.parse(row.theme as string ?? '{}'),
     formFields: JSON.parse(row.form_fields as string ?? '[]'),
     serviceIds: JSON.parse(row.service_ids as string ?? '[]'),
+    isDefault: Boolean(row.is_default),
     createdAt: row.created_at,
   };
 }
@@ -83,6 +85,24 @@ router.get('/', canRead, (req: AuthRequest, res, next) => {
       .prepare('SELECT * FROM booking_pages WHERE organization_id = ? ORDER BY title')
       .all(req.user!.orgId) as Record<string, unknown>[];
     res.json({ data: rows.map(rowToPage) });
+  } catch (err) { next(err); }
+});
+
+// ─── V4: the one default booking link ────────────────────────────────────────
+// GET returns (creating on first use) the business's default page: { id, slug, title, isPublished }.
+router.get('/default', canRead, (req: AuthRequest, res, next) => {
+  try { res.json({ data: ensureDefaultBookingPage(req.user!.orgId) }); } catch (err) { next(err); }
+});
+
+// "Accept online bookings" on or off.
+const DefaultPageSchema = z.object({ isPublished: z.boolean().optional() }).strict();
+router.put('/default', requirePermission('settings:write', 'booking_pages:write'), (req: AuthRequest, res, next) => {
+  try {
+    const parsed = DefaultPageSchema.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.errors[0]?.message ?? 'Validation error' }); return; }
+    const orgId = req.user!.orgId;
+    const page = parsed.data.isPublished === undefined ? ensureDefaultBookingPage(orgId) : setOnlineBooking(orgId, parsed.data.isPublished);
+    res.json({ data: page });
   } catch (err) { next(err); }
 });
 
@@ -181,6 +201,11 @@ router.post('/:id/publish', canWrite, (req: AuthRequest, res, next) => {
 
 router.delete('/:id', canWrite, (req: AuthRequest, res, next) => {
   try {
+    // The default booking link stays; switch off online bookings instead.
+    if (db.prepare('SELECT 1 FROM booking_pages WHERE id = ? AND organization_id = ? AND is_default = 1').get(req.params.id, req.user!.orgId)) {
+      res.status(409).json({ error: 'The default booking page cannot be deleted. Turn off online bookings instead.', code: 'DEFAULT_PAGE' });
+      return;
+    }
     const result = db
       .prepare('DELETE FROM booking_pages WHERE id = ? AND organization_id = ?')
       .run(req.params.id, req.user!.orgId);

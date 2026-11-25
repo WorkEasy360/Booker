@@ -114,6 +114,8 @@ export interface AuthUser {
   permissions?: string[];
   /** Staff record this sign-in belongs to (staff and manager accounts created by invitation). */
   staffId?: string | null;
+  /** Profile photo (My Account), or the photo of the linked staff record; null shows initials. */
+  photoUrl?: string | null;
 }
 
 export interface InvitationPreview { businessName: string; staffName: string; email: string; role: 'staff' | 'manager'; expiresAt: string }
@@ -156,13 +158,14 @@ export type LoginResponse =
 
 export type SecondFactor = { code: string } | { recoveryCode: string };
 
-export function login(email: string, password: string) {
-  return request<LoginResponse>('POST', '/auth/login', { email, password });
+/** remember=false: the session ends when the browser closes (no persistent cookie). */
+export function login(email: string, password: string, remember = true) {
+  return request<LoginResponse>('POST', '/auth/login', { email, password, remember });
 }
 
 /** The second sign-in step: a code from the authenticator app or a recovery code. */
-export function loginSecondStep(challenge: string, factor: SecondFactor) {
-  return request<{ user: AuthUser; csrfToken: string }>('POST', '/auth/login/2fa', { challenge, ...factor });
+export function loginSecondStep(challenge: string, factor: SecondFactor, remember = true) {
+  return request<{ user: AuthUser; csrfToken: string }>('POST', '/auth/login/2fa', { challenge, ...factor, remember });
 }
 
 /** The browser's IANA time zone, if it reports one. */
@@ -213,7 +216,7 @@ export const staffApi = {
   update: (id: string, data: unknown) => api.put<unknown>(`/staff/${id}`, data),
   delete: (id: string)   => api.delete<unknown>(`/staff/${id}`),
   /** Emails a single-use sign-in invitation to the staff member's address. The token is never returned. */
-  invite: (id: string, role: 'staff' | 'manager') =>
+  invite: (id: string, role: 'staff' | 'manager' | 'admin') =>
     api.post<{ invitation: StaffInvitation; email: { status: string; error?: string } }>(`/staff/${id}/invitations`, { role }),
   invitations: (id: string) => api.get<StaffInvitation[]>(`/staff/${id}/invitations`),
   revokeInvitation: (id: string, invitationId: string) => api.delete<{ revoked: boolean }>(`/staff/${id}/invitations/${invitationId}`),
@@ -357,6 +360,9 @@ const UPLOAD_TIMEOUT_MS = 60_000;
 export const mediaApi = {
   uploadLogo: (file: Blob) => request<UploadedImage>('PUT', '/settings/logo', undefined, { raw: file, timeoutMs: UPLOAD_TIMEOUT_MS }),
   removeLogo: () => request<{ removed: boolean }>('DELETE', '/settings/logo'),
+  /** The signed-in person's own profile photo (shown in the header). */
+  uploadMyPhoto: (file: Blob) => request<UploadedImage>('PUT', '/auth/photo', undefined, { raw: file, timeoutMs: UPLOAD_TIMEOUT_MS }),
+  removeMyPhoto: () => request<{ removed: boolean }>('DELETE', '/auth/photo'),
   uploadStaffPhoto: (staffId: string, file: Blob) =>
     request<UploadedImage>('PUT', `/staff/${staffId}/photo`, undefined, { raw: file, timeoutMs: UPLOAD_TIMEOUT_MS }),
   removeStaffPhoto: (staffId: string) => request<{ removed: boolean }>('DELETE', `/staff/${staffId}/photo`),
@@ -365,7 +371,7 @@ export const mediaApi = {
 export interface StaffInvitation {
   id: string;
   email: string;
-  role: 'staff' | 'manager';
+  role: 'staff' | 'manager' | 'admin';
   status: 'pending' | 'accepted' | 'expired' | 'revoked';
   createdAt: string;
   expiresAt: string;
@@ -497,7 +503,10 @@ export interface ManagedBooking {
   serviceName: string;
   staffName: string;
   maskedEmail: string;
-  business: { name: string; phone: string | null; website: string | null };
+  business: { name: string; phone: string | null; email?: string | null; website: string | null };
+  /** False once the business cutoff has passed: changes go through the business (contact shown instead). */
+  canChange?: boolean;
+  cutoffHours?: number;
   tokenExpiresAt?: string;
 }
 
@@ -530,3 +539,58 @@ export const publicApi = {
     return { filename, content: await res.text() };
   },
 };
+
+// ── V4: one default booking link, availability, customer matching ─────────────
+
+/** The business's one default booking page (created on first use, lists every active service). */
+export interface DefaultBookingPage { id: string; slug: string; title: string; isPublished: boolean }
+
+export const bookingLinkApi = {
+  get: () => request<DefaultBookingPage>('GET', '/booking-pages/default'),
+  /** isPublished = "Accept online bookings". */
+  update: (data: { isPublished?: boolean }) => request<DefaultBookingPage>('PUT', '/booking-pages/default', data),
+};
+
+/** Whole-day or part-day block (time off for one provider, or a closure of the whole business when staffId is null). */
+export interface TimeOffPeriod {
+  id: string; staffId: string | null; staffName: string | null;
+  startDate: string; endDate: string; startTime: string | null; endTime: string | null;
+  reason: string; wholeDay: boolean; createdAt: string;
+}
+/** Different opening hours on one date, replacing the weekly hours of that day (business when staffId is null). */
+export interface DateHours {
+  id: string; staffId: string | null; staffName: string | null;
+  date: string; startTime: string; endTime: string; reason: string; createdAt: string;
+}
+/** Weekly break: a gap between two working ranges of a day. */
+export interface ScheduleBreak { id: string; staffId: string | null; staffName: string | null; weekday: string; startTime: string; endTime: string; label: string }
+/** A future Scheduled appointment that no longer fits the saved availability. Never changed automatically. */
+export interface AffectedAppointment {
+  id: string; bookingRef: string; date: string; startTime: string; endTime: string;
+  staffId: string; staffName: string; customerName: string; serviceName: string; problem: string;
+}
+
+const qs = (params?: Record<string, string | undefined>) => {
+  const entries = Object.entries(params ?? {}).filter(([, v]) => v !== undefined && v !== '') as Array<[string, string]>;
+  return entries.length ? `?${new URLSearchParams(entries).toString()}` : '';
+};
+
+export const availabilityApi = {
+  timeOff: (params?: { staffId?: string; from?: string; to?: string }) => request<TimeOffPeriod[]>('GET', `/time-off${qs(params)}`),
+  addTimeOff: (data: { staffId?: string | null; startDate: string; endDate: string; startTime?: string; endTime?: string; reason?: string }) =>
+    request<TimeOffPeriod>('POST', '/time-off', data),
+  removeTimeOff: (id: string) => request<{ id: string }>('DELETE', `/time-off/${id}`),
+  dateHours: (params?: { staffId?: string; from?: string; to?: string }) => request<DateHours[]>('GET', `/time-off/date-hours${qs(params)}`),
+  addDateHours: (data: { staffId?: string | null; date: string; startTime: string; endTime: string; reason?: string }) =>
+    request<DateHours>('POST', '/time-off/date-hours', data),
+  removeDateHours: (id: string) => request<{ id: string }>('DELETE', `/time-off/date-hours/${id}`),
+  breaks: (staffId?: string) => request<ScheduleBreak[]>('GET', `/time-off/breaks${qs({ staffId })}`),
+  addBreak: (data: { staffId?: string | null; weekday: string; startTime: string; endTime: string; label?: string }) =>
+    request<ScheduleBreak>('POST', '/time-off/breaks', data),
+  removeBreak: (id: string) => request<{ id: string }>('DELETE', `/time-off/breaks/${id}`),
+  /** Future Scheduled appointments outside the current availability (after hours or exceptions change). */
+  affected: (staffId?: string) => request<AffectedAppointment[]>('GET', `/time-off/affected${qs({ staffId })}`),
+};
+
+/** Portal links for the account menu (shared WorkEasy360 services, opened in the current organization). */
+export const ACCOUNT_PORTAL_URL: string = (import.meta.env.VITE_ACCOUNT_PORTAL_URL as string | undefined)?.replace(/\/$/, '') || 'https://app.workeasy360.com';

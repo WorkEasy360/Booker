@@ -288,7 +288,7 @@ function run() {
   if (!apptExists) {
     const appts = [
       { id: 'appt-1', ref: 'WE-SEED0001', serviceId: 'svc-1', staffId: 'staff-1', customerId: 'cust-1', date: today, start: '09:00', end: '10:00', duration: 60, status: 'scheduled' },
-      { id: 'appt-2', ref: 'WE-SEED0002', serviceId: 'svc-2', staffId: 'staff-2', customerId: 'cust-2', date: today, start: '10:00', end: '10:45', duration: 45, status: 'confirmed' },
+      { id: 'appt-2', ref: 'WE-SEED0002', serviceId: 'svc-2', staffId: 'staff-2', customerId: 'cust-2', date: today, start: '10:00', end: '10:45', duration: 45, status: 'scheduled' },
       { id: 'appt-3', ref: 'WE-SEED0003', serviceId: 'svc-3', staffId: 'staff-3', customerId: 'cust-3', date: today, start: '11:00', end: '12:30', duration: 90, status: 'scheduled' },
     ];
     for (const a of appts) {

@@ -57,7 +57,7 @@ function when(d: AppointmentEmailData, slot: { date: string; startTime: string; 
 }
 
 // ─── Shared layout ────────────────────────────────────────────────────────────
-// Every email has a small text-based WorkeasyBooking header, opens with the business's own name (the identity the
+// Every email has a small text-based WorkEasy360 Booking header, opens with the business's own name (the identity the
 // customer or staff member knows), and ends with a footer saying who sent it. Tables and inline styles only, for email
 // clients; no images, so nothing can be blocked or broken.
 
@@ -67,7 +67,7 @@ const BORDER = '#E1E7EB';
 /** Secondary text: 5.1:1 contrast on the page background, 6.0:1 on white. */
 const MUTED = '#5B6B78';
 
-/** "WorkeasyBooking" as text, in the brand navy. */
+/** "WorkEasy360 Booking" as text, in the brand navy. */
 function brandWordmark(): string {
   return `<span style="color:${BRAND_COLORS.navy};font-weight:700">${escapeHtml(PRODUCT_NAME)}</span>`;
 }
@@ -299,7 +299,7 @@ export interface InvitationEmailData {
   businessName: string;
   staffName: string;
   inviterName: string;
-  role: 'staff' | 'manager';
+  role: 'staff' | 'manager' | 'admin';
   acceptUrl: string;
   expiresAt: string;   // ISO timestamp
   timezone: string;    // business time zone, for showing the expiry
@@ -308,6 +308,7 @@ export interface InvitationEmailData {
 const ROLE_SUMMARY: Record<InvitationEmailData['role'], string> = {
   staff: 'see your own schedule and appointments',
   manager: 'manage appointments, customers, services, booking pages and reports',
+  admin: 'manage the whole business: appointments, customers, services, availability, team and settings',
 };
 
 function formatExpiry(iso: string, timezone: string): string {
@@ -322,7 +323,7 @@ function formatExpiry(iso: string, timezone: string): string {
 export function renderInvitationEmail(d: InvitationEmailData): { subject: string; text: string; html: string } {
   const subject = `${d.inviterName} invited you to ${d.businessName} on ${PRODUCT_NAME}`;
   const expiry = formatExpiry(d.expiresAt, d.timezone);
-  const roleName = d.role === 'manager' ? 'a manager' : 'a staff member';
+  const roleName = d.role === 'admin' ? 'an owner' : d.role === 'manager' ? 'a manager' : 'a staff member';
   const text = [
     `Hi ${d.staffName},`,
     '',

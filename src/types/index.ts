@@ -1,7 +1,8 @@
 // ─── Core domain types for WorkEasy360 ───────────────────────────────────────
 
 // Must match the backend enum in server/src/routes/appointments.ts
-export type AppointmentStatus = 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show';
+// V4: only Scheduled / Completed / Cancelled / No-show. New bookings are Scheduled; there is no approval stage.
+export type AppointmentStatus = 'scheduled' | 'completed' | 'cancelled' | 'no_show';
 export type UserRole = 'owner' | 'admin' | 'staff' | 'viewer';
 export type ServiceCategory = 'consultation' | 'class' | 'workshop' | 'session' | 'tour' | 'rental' | 'other';
 export type ResourceType = 'room' | 'equipment' | 'vehicle' | 'table' | 'other';

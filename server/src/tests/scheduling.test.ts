@@ -130,7 +130,11 @@ describe('weekly breaks', () => {
     const staffUser = await userWithRole(b.orgId, 'staff');
     expect((await post(manager, { staffId: ada, weekday: 'tuesday', startTime: '12:00', endTime: '13:00' })).status).toBe(403);
     expect((await post(staffUser, { weekday: 'tuesday', startTime: '12:00', endTime: '13:00' })).status).toBe(403);
-    expect((await request(app).get('/api/time-off/breaks').set(staffUser)).status).toBe(403);
+    // V4: staff may read availability, but only their own rows and the business's, never a colleague's (this sign-in has no staff record).
+    expect((await post(b.h, { staffId: ada, weekday: 'monday', startTime: '12:00', endTime: '13:00' })).status).toBe(201);
+    const seen = await request(app).get('/api/time-off/breaks').set(staffUser);
+    expect(seen.status).toBe(200);
+    expect(seen.body.data.filter((x: { staffId: string | null }) => x.staffId !== null)).toEqual([]);
     expect((await request(app).get('/api/time-off/breaks').set(manager)).status).toBe(200);
     expect((await request(app).post('/api/time-off/breaks').send({ weekday: 'tuesday', startTime: '12:00', endTime: '13:00' })).status).toBe(401);
   });
@@ -213,7 +217,11 @@ describe('time off and business closures', () => {
     expect((await post(manager, { staffId: ada, startDate: d, endDate: d })).status).toBe(403); // staff management is admin-only
     expect((await post(manager, { startDate: d, endDate: d })).status).toBe(403);             // closures need business settings
     expect((await request(app).get('/api/time-off').set(manager)).status).toBe(200);           // but managers can see them
-    expect((await request(app).get('/api/time-off').set(staffUser)).status).toBe(403);
+    // V4: staff may read availability, but only their own rows and the business's, never a colleague's (this sign-in has no staff record).
+    await post(b.h, { staffId: ada, startDate: d, endDate: d, reason: 'Colleague only' }).then(r => expect(r.status).toBe(201));
+    const seen = await request(app).get('/api/time-off').set(staffUser);
+    expect(seen.status).toBe(200);
+    expect(JSON.stringify(seen.body)).not.toContain('Colleague only');
     // Another business can neither use this staff member nor see or delete this business's periods.
     expect((await post(other.h, { staffId: ada, startDate: d, endDate: d })).status).toBe(404);
     const mine = await post(b.h, { staffId: ada, startDate: d, endDate: d, reason: 'Private reason' });

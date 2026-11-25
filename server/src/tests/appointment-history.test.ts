@@ -84,10 +84,11 @@ beforeAll(async () => {
 beforeEach(() => testOutbox.clear());
 
 describe('recorded from the dashboard', () => {
-  it('creation, confirmation, a move, a staff change, cancellation and restoring, in order, with who did each', async () => {
+  it('creation, a move, a staff change, cancellation and restoring, in order, with who did each', async () => {
     const created = await request(app).post('/api/appointments').set(A.h).send({ serviceId: A.serviceId, staffId: A.staffA, customerId: A.customerId, date: day(20), startTime: '10:00' });
     expect(created.status).toBe(201);
     const id = created.body.data.id;
+    // V4: "confirmed" is read as "scheduled", so it is not a change and records nothing.
     expect((await put(A, id, { status: 'confirmed' })).status).toBe(200);
     expect((await put(A, id, { date: day(21), startTime: '11:00' })).status).toBe(200);
     expect((await put(A, id, { staffId: A.staffB })).status).toBe(200);
@@ -100,15 +101,14 @@ describe('recorded from the dashboard', () => {
     const entries = res.body.data as Array<Record<string, any>>;
     expect(entries.map(e => [e.action, e.fromStatus, e.toStatus])).toEqual([
       ['created', null, 'scheduled'],
-      ['status_changed', 'scheduled', 'confirmed'],
       ['rescheduled', null, null],
       ['reassigned', null, null],
-      ['status_changed', 'confirmed', 'cancelled'],
+      ['status_changed', 'scheduled', 'cancelled'],
       ['status_changed', 'cancelled', 'scheduled'],
     ]);
     expect(entries[0]).toMatchObject({ toDate: day(20), toStartTime: '10:00', toStaff: { id: A.staffA, name: 'Asha a' } });
-    expect(entries[2]).toMatchObject({ fromDate: day(20), fromStartTime: '10:00', toDate: day(21), toStartTime: '11:00' });
-    expect(entries[3]).toMatchObject({ fromStaff: { id: A.staffA, name: 'Asha a' }, toStaff: { id: A.staffB, name: 'Bilal a' } });
+    expect(entries[1]).toMatchObject({ fromDate: day(20), fromStartTime: '10:00', toDate: day(21), toStartTime: '11:00' });
+    expect(entries[2]).toMatchObject({ fromStaff: { id: A.staffA, name: 'Asha a' }, toStaff: { id: A.staffB, name: 'Bilal a' } });
     for (const e of entries) expect(e.actor).toEqual({ type: 'user', name: 'Owner a', source: 'dashboard' });
     expect(entries.every(e => !Number.isNaN(Date.parse(e.createdAt)))).toBe(true);
   });
@@ -145,7 +145,7 @@ describe('recorded from the dashboard', () => {
     db.exec(`CREATE TEMP TRIGGER fail_history BEFORE INSERT ON appointment_history WHEN NEW.appointment_id = '${id}'
              BEGIN SELECT RAISE(ABORT, 'simulated failure'); END`);
     try {
-      expect((await put(A, id, { status: 'confirmed' })).status).toBe(500);
+      expect((await put(A, id, { status: 'cancelled' })).status).toBe(500);
     } finally {
       db.exec('DROP TRIGGER temp.fail_history');
     }
@@ -245,13 +245,13 @@ describe('recorded from the booking page, the manage link and the assistant', ()
     expect(rowsFor(id)).toHaveLength(3);
   });
 
-  it('moving a confirmed booking records the move and the status going back to scheduled', async () => {
+  it('a customer moving a booking records only the move (the booking stays Scheduled)', async () => {
     const booked = await publicBook(A, day(28), '10:00', `confirm-${RUN}@example.com`);
     const { appointmentId: id, manageToken } = booked.body.data;
-    expect((await put(A, id, { status: 'confirmed' })).status).toBe(200);
+    expect((await put(A, id, { status: 'confirmed' })).status).toBe(200); // legacy value: the same as scheduled
     expect((await manageMove(manageToken, day(28), '12:00')).status).toBe(200);
     expect(rowsFor(id).map(r => [r.action, r.actor_type])).toEqual([
-      ['created', 'customer'], ['status_changed', 'user'], ['status_changed', 'customer'], ['rescheduled', 'customer'],
+      ['created', 'customer'], ['rescheduled', 'customer'],
     ]);
   });
 
@@ -286,12 +286,12 @@ describe('what customers can change online', () => {
 
   it('an appointment that has started cannot be cancelled or moved online', async () => {
     const started = instantToZoned(Date.now() - 5 * 60_000, TZ);
-    const { id } = insertAppointment(A, started.date, started.time.slice(0, 5), 'confirmed', A.staffB);
+    const { id } = insertAppointment(A, started.date, started.time.slice(0, 5), 'scheduled', A.staffB);
     const token = issueManageToken(id, `cust-a-${RUN}@example.com`, Date.now() + 3_600_000);
     const cancel = await manageCancel(token);
     expect([cancel.status, cancel.body.error]).toEqual([400, expect.stringMatching(/already started/)]);
     expect((await manageMove(token, day(31), '10:00')).status).toBe(400);
-    expect((db.prepare('SELECT status FROM appointments WHERE id = ?').get(id) as { status: string }).status).toBe('confirmed');
+    expect((db.prepare('SELECT status FROM appointments WHERE id = ?').get(id) as { status: string }).status).toBe('scheduled');
   });
 
   it('an expired or altered link changes nothing', async () => {

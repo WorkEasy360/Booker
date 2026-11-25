@@ -2,17 +2,22 @@
  * Local answer engine — intent-routed responses without external AI APIs.
  * Routes to: BM25 knowledge retrieval, live DB queries, navigation, record
  * search, action proposals, or clarification requests.
+ *
+ * Answers describe WorkEasy360 Booking V4: four menus (Appointments with its calendar view, Availability, Customers,
+ * Settings) and My Account. Services have a name and a duration only; there are no prices or revenue.
  */
 
 import { nanoid } from 'nanoid';
 import db from '../db/init';
 import { retrieve, queryTerms, stem, termWeights } from './rag';
-import { routeIntent, extractDuration, extractPrice, extractDate, extractPersonName, extractServiceName, normalizeTypos } from './intent-router';
+import { routeIntent, extractDuration, extractPrice, extractDate, extractServiceName, normalizeTypos } from './intent-router';
 import type { AuthPayload } from '../types';
 import { can } from '../auth/permissions';
 import { todayInTimezone, getOrgTimezone, freeTimesByStaff } from './availability';
-import { DEFAULT_CURRENCY } from './business-locale';
-import { CUSTOMER_BOOKING_COUNT } from './customer-bookings';
+import {
+  appointmentCounts, periodRange, shiftDate, statusLabel, findCustomers, findServices, findStaff, findAppointments,
+  type SummaryPeriod,
+} from './ai-tools';
 
 // ── Response type contract ─────────────────────────────────────────────────────
 
@@ -84,27 +89,32 @@ function makeResult(partial: Partial<LocalAnswerResult> & { answer: string }): L
   };
 }
 
+/** "Monday, December 1" for a YYYY-MM-DD date (calendar date, no time zone shift). */
+function longDate(iso: string): string {
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
+}
+
 // ── Synonym expansion for BM25 queries ────────────────────────────────────────
 
+// Words people use → the word the help articles use. Expanding the other way too ("staff" → member, team, invite,
+// provider…) made every staff question look like the Team article, even "staff working hours" (Availability).
 const SYNONYMS: Record<string, string[]> = {
   create:       ['add', 'new', 'make', 'set up', 'build', 'configure'],
   appointment:  ['booking', 'meeting', 'schedule', 'session', 'slot', 'अपॉइंटमेंट', 'बुकिंग'],
   service:      ['treatment', 'offering', 'सेवा'],
   staff:        ['employee', 'member', 'provider', 'therapist', 'doctor', 'team member', 'colleague', 'coworker', 'teammate', 'invite', 'onboard', 'hire', 'स्टाफ'],
   customer:     ['client', 'patient', 'ग्राहक'],
-  workspace:    ['location', 'branch', 'clinic', 'office'],
-  resource:     ['room', 'equipment', 'asset'],
   cancel:       ['delete', 'remove', 'stop', 'void', 'रद्द'],
   reschedule:   ['change time', 'move', 'shift', 'postpone'],
   settings:     ['configuration', 'preferences', 'config', 'सेटिंग'],
-  report:       ['analytics', 'statistics', 'metrics', 'रिपोर्ट'],
-  dashboard:    ['home', 'overview', 'main page'],
   password:     ['credentials', 'login details', 'पासवर्ड'],
-  notification: ['reminder', 'email reminder', 'email alert', 'notify', 'sms'],
+  notification: ['reminder', 'email reminder', 'email alert', 'notify', 'sms', 'whatsapp'],
   reminder:     ['notification', 'email reminder', 'email alert'],
-  integration:  ['connect', 'sync', 'google calendar', 'google sync'],
+  integration:  ['connect', 'sync', 'webhook'],
   calendar:     ['timetable', 'agenda', 'schedule view'],
-  account:      ['login', 'user account', 'my account', 'deactivate'],
+  account:      ['login', 'user account', 'my account'],
+  availability: ['working hours', 'opening hours', 'business hours', 'time off', 'holiday', 'day off'],
+  exception:    ['holiday', 'closure', 'time off', 'day off', 'leave', 'vacation'],
   // Hinglish
   kaise:        ['how to', 'how do i'],
   banate:       ['create', 'make', 'add'],
@@ -113,6 +123,9 @@ const SYNONYMS: Record<string, string[]> = {
   hain:         ['is', 'are'],
 };
 
+// Keys whose synonyms are searched too: Hinglish words, and "create" (articles say "Adding…" and "Add Service").
+const TWO_WAY = new Set(['create', 'kaise', 'banate', 'karein', 'karte', 'hain']);
+
 function expandQuery(query: string): string {
   const lower = query.toLowerCase();
   const expansions = new Set([lower]);
@@ -120,42 +133,57 @@ function expandQuery(query: string): string {
     for (const syn of syns) {
       if (lower.includes(syn)) expansions.add(lower.replace(syn, key));
     }
-    if (lower.includes(key)) {
+    if (TWO_WAY.has(key) && lower.includes(key)) {
       for (const syn of syns) expansions.add(lower.replace(key, syn));
     }
   }
   return Array.from(expansions).join(' ');
 }
 
-// ── Suggestions shown when confidence is low ──────────────────────────────────
+// ── Suggestions shown when a question is too vague or confidence is low ───────
 
-const FEATURE_SUGGESTIONS: Record<string, string[]> = {
-  staff:        ['How do I add a new staff member?', 'How to set staff working hours?', 'How to assign staff to services?'],
-  appointment:  ['How do I create an appointment?', 'How to reschedule an appointment?', 'How to cancel an appointment?'],
-  service:      ['How do I create a service?', 'How to set service duration and price?', 'How to assign staff to a service?'],
-  customer:     ['How do I add a customer?', 'How to find a customer?', 'How to view customer bookings?'],
-  settings:     ['How to change my password?', 'How to set business working hours?', 'How to configure notifications?'],
-  report:       ['What reports are available?', 'How to view revenue reports?', 'How to check appointment stats?'],
-  notification: ['How to set up email reminders?', 'How to configure notifications?', 'What notification types are available?'],
-  integration:  ['How to connect Google Calendar?', 'What integrations are available?', 'How to set up calendar sync?'],
-  workspace:    ['How do I create a workspace?', 'How to invite team members to a workspace?', 'How to set workspace hours?'],
+const SUGGESTIONS: Record<string, string[]> = {
+  staff:         ['How do I add a staff member?', 'How do I set a staff member\'s working hours?', 'How do I invite a staff member to sign in?'],
+  appointment:   ['How do I create an appointment?', 'How do I reschedule an appointment?', 'How do I cancel an appointment?'],
+  service:       ['How do I add a service?', 'How do I change a service\'s duration?', 'How do I choose who offers a service?'],
+  customer:      ['How do I add a customer?', 'How do I find a customer?', 'How do I see a customer\'s appointment history?'],
+  availability:  ['How do I set business working hours?', 'How do I block a holiday?', 'How do I add time off for a staff member?'],
+  booking:       ['How do I share my booking link?', 'How do I turn online booking on or off?', 'How do customers cancel their booking?'],
+  settings:      ['How do I change the business timezone?', 'How do I change my business details?', 'Where are the settings for notifications?'],
+  account:       ['How do I change my password?', 'How do I turn on two-factor sign-in?', 'How do I get help from WorkEasy360 support?'],
+  notification:  ['How do I send appointment reminders?', 'How do I turn on SMS or WhatsApp messages?', 'Why did a customer not get the confirmation email?'],
+  integration:   ['What integrations are available?', 'How do I send booking events to a webhook?', 'Can I connect Google Calendar?'],
+  permissions:   ['What can a staff member do?', 'What can an owner do?', 'How do I invite a staff member to sign in?'],
+  limitations:   ['Can customers pay online?', 'Are reports available?', 'Can I add several locations?'],
+};
+
+// Article categories and router features that share a list of suggestions.
+const SUGGESTION_ALIASES: Record<string, string> = {
+  appointments: 'appointment', services: 'service', customers: 'customer', 'public-booking': 'booking',
+  notifications: 'notification', automation: 'notification', integrations: 'integration', video: 'integration',
+  report: 'limitations', data: 'limitations', workspace: 'limitations', resource: 'limitations', payment: 'limitations', dashboard: 'appointment',
 };
 
 const DEFAULT_SUGGESTIONS = [
   'How do I create an appointment?',
-  'How do I add a staff member?',
-  'What reports are available?',
+  'How do I set business working hours?',
+  'How do I share my booking link?',
 ];
+
+function suggestionsFor(key: string | undefined): string[] {
+  if (!key) return DEFAULT_SUGGESTIONS;
+  return SUGGESTIONS[key] ?? SUGGESTIONS[SUGGESTION_ALIASES[key] ?? ''] ?? DEFAULT_SUGGESTIONS;
+}
 
 // ── BM25 answer assembly ───────────────────────────────────────────────────────
 
 interface RetrievedChunk { docId: string; docTitle: string; category: string; content: string; score: number }
 
-const ROUTE_PATTERN = /`?(\/[a-z][a-z0-9/-]*)`?/g;
+const ROUTE_PATTERN = /`?(\/[a-z][a-z0-9/-]*(?:\?[a-z]+=[a-z-]+)?)`?/g;
+/** The first in-app address named in a text (public booking links and API paths are not screens). */
 function extractRoute(text: string): string | undefined {
-  const matches = text.match(ROUTE_PATTERN);
-  if (!matches) return undefined;
-  return matches.find(m => !m.startsWith('/api') && !m.startsWith('/book')) ?? matches[0];
+  const routes = [...text.matchAll(ROUTE_PATTERN)].map(m => m[1]);
+  return routes.find(r => !r.startsWith('/api') && !r.startsWith('/book'));
 }
 
 function extractSteps(text: string): string[] {
@@ -199,7 +227,7 @@ function leadOf(body: string): string[] {
 
 const stemsOf = (text: string): Set<string> => new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).map(stem));
 
-// Verbs people use for the action a heading names ("add a workspace" → "Creating a workspace").
+// Verbs people use for the action a heading names ("add a service" → "Adding a service").
 const ACTION_SYNONYMS = [['create', 'add', 'new', 'make'], ['edit', 'change', 'update', 'modify']];
 const alternativesOf = (term: string): string[] =>
   [term, ...(ACTION_SYNONYMS.find(group => group.includes(term)) ?? []).filter(w => w !== term)];
@@ -207,15 +235,26 @@ const alternativesOf = (term: string): string[] =>
 /**
  * The section of an article whose heading best matches the question. Heading words are compared by stem and weighted
  * by how rare they are in the knowledge base, so "time off" outweighs "staff". Words of the article's own title
- * ("Staff — Complete Guide") say nothing about which section is meant and are left out. Ties go to a section with
- * steps, then to the earlier one.
+ * ("Team — Guide") say nothing about which section is meant and are left out. Ties go to a section with steps, then
+ * to the earlier one.
  */
 function bestSection(article: string, query: string): Section | undefined {
+  return sectionMatch(article, query)?.section;
+}
+
+/**
+ * The best section of an article for a question. `score` weighs the question words its heading names; `fullScore`
+ * also counts those the article's title names, so articles with different titles can be compared.
+ */
+function sectionMatch(article: string, query: string): { section: Section; score: number; fullScore: number } | undefined {
   const sections = sectionsOf(article);
   const titleStems = stemsOf(sections.find(s => s.level === 1)?.title ?? '');
-  const terms = queryTerms(query).filter(t => !titleStems.has(stem(t)));
+  const allTerms = queryTerms(query);
+  const untitled = allTerms.filter(t => !titleStems.has(stem(t)));
+  // When the question only names the article's title ("What is WorkEasy360 Booking?"), the title words pick the section.
+  const terms = untitled.length ? untitled : allTerms;
   if (!terms.length) return undefined;
-  const weights = termWeights(terms);
+  const weights = termWeights(allTerms);
   const total = terms.reduce((sum, t) => sum + (weights.get(t) ?? 0), 0);
   // Action synonyms only for "how do I …" questions: "Can staff change appointment status?" is not about editing.
   const procedural = /^\s*how\b/i.test(query);
@@ -231,12 +270,36 @@ function bestSection(article: string, query: string): Section | undefined {
       const all = stemsOf(`${s.title}\n${s.body}`);
       const score = terms.reduce((sum, t) => sum + (inHeading(heading, t) ? weights.get(t) ?? 0 : 0), 0);
       const covered = terms.reduce((sum, t) => sum + (inHeading(all, t) ? weights.get(t) ?? 0 : 0), 0);
-      return { s, i, score, covered, steps: extractSteps(s.body).length > 0 ? 1 : 0 };
+      const full = allTerms.reduce((sum, t) => sum + (titleStems.has(stem(t)) || inHeading(heading, t) ? weights.get(t) ?? 0 : 0), 0);
+      return { s, i, score, covered, full, steps: extractSteps(s.body).length > 0 ? 1 : 0 };
     })
     // The heading must name part of the question, and the section must cover at least half of it:
     // "Does Zoom work?" is not answered by a section called "What does work" that never mentions Zoom.
     .filter(x => x.score > 0 && x.covered >= total / 2)
-    .sort((a, b) => b.score - a.score || b.steps - a.steps || a.i - b.i)[0]?.s;
+    .sort((a, b) => b.score - a.score || b.steps - a.steps || a.i - b.i)
+    .map(x => ({ section: x.s, score: x.score, fullScore: x.full }))[0];
+}
+
+/**
+ * The retrieved article to answer from: the best keyword match, unless another well-matching article has a section
+ * whose heading (with the article's title) names more of the question. "How do I see a customer's appointment
+ * history?" is answered by the Customers article, not by the Appointments article that happens to mention history
+ * more often. On a tie, a "why …" question prefers Troubleshooting. The chosen article's chunks come first.
+ */
+function chooseArticle(chunks: RetrievedChunk[], query: string, prefer?: string): RetrievedChunk[] {
+  const docIds = [...new Set(chunks.map(c => c.docId))];
+  if (docIds.length < 2) return chunks;
+  const top = chunks[0].score;
+  const candidates = docIds
+    .filter(id => Math.max(...chunks.filter(c => c.docId === id).map(c => c.score)) >= top * 0.4)
+    .map(id => {
+      const own = chunks.filter(c => c.docId === id);
+      const match = sectionMatch(own.map(c => c.content).join('\n\n'), query);
+      return { id, score: (match?.fullScore ?? 0) + (match && own[0].category === prefer ? 1e-6 : 0) };
+    });
+  const best = candidates.reduce((a, b) => (b.score > a.score + 1e-9 ? b : a));
+  if (best.id === docIds[0]) return chunks;
+  return [...chunks.filter(c => c.docId === best.id), ...chunks.filter(c => c.docId !== best.id)];
 }
 
 type LegacyIntent = 'how_to' | 'where_is' | 'what_is' | 'troubleshoot' | 'list' | 'general';
@@ -248,7 +311,7 @@ function assembleBM25Answer(
 ): { text: string; steps: string[]; navigation: string | undefined } {
   if (chunks.length === 0) {
     return {
-      text: "I don't have specific information about that in the WorkEasy360 knowledge base.",
+      text: "I don't have specific information about that in the WorkEasy360 Booking help articles.",
       steps: [],
       navigation: undefined,
     };
@@ -270,7 +333,7 @@ function assembleBM25Answer(
       if (sectionSteps.length > 0) {
         return { text: [section.title, ...leadOf(section.body).slice(0, 1)].join('\n\n'), steps: sectionSteps.slice(0, 10), navigation };
       }
-      // A section without steps (for example "not available yet") is answered with its own words.
+      // A section without steps (for example "not available") is answered with its own words.
       if (prose.length > 0) return { text: [section.title, ...prose.slice(0, 2)].join('\n\n'), steps: [], navigation };
     }
 
@@ -280,9 +343,9 @@ function assembleBM25Answer(
     if (chunkSteps.length > 0 && !sectionsOf(article).some(s => s.level >= 2)) {
       return { text: topChunk.split('\n')[0].replace(/^#+\s*/, ''), steps: chunkSteps.slice(0, 10), navigation: extractRoute(topChunk) };
     }
-    const paras = topChunk.split('\n\n').filter(p => p.trim().length > 30);
+    // The opening prose only: never a heading line or another procedure's steps.
     return {
-      text: paras.slice(0, 2).join('\n\n').replace(/^#+\s*/gm, '').trim(),
+      text: paragraphsOf(topChunk).slice(0, 2).join('\n\n').trim() || topChunk.split('\n')[0].replace(/^#+\s*/, ''),
       steps: [], navigation: extractRoute(topChunk),
     };
   }
@@ -292,17 +355,21 @@ function assembleBM25Answer(
   if (intent === 'where_is' || intent === 'what_is') {
     // The section the question names, when one matches; otherwise the article's opening.
     const section = bestSection(article, queryHint);
-    const sectionText = section ? paragraphsOf(section.body)[0] : undefined;
-    if (section && sectionText) {
+    if (section) {
+      const sectionSteps = extractSteps(section.body);
+      const sectionText = leadOf(section.body)[0] ?? paragraphsOf(section.body)[0];
       const sectionRoute = extractRoute(`${section.heading}\n${section.body}`) ?? navigation;
       const routeInfo = intent === 'where_is' && sectionRoute ? ` You can find it at \`${sectionRoute}\`.` : '';
-      return { text: `${section.title}: ${sectionText}${routeInfo}`, steps: [], navigation: sectionRoute };
+      if (intent === 'where_is' && sectionSteps.length > 0) {
+        return { text: `${section.title}.${routeInfo}`, steps: sectionSteps.slice(0, 10), navigation: sectionRoute };
+      }
+      if (sectionText) return { text: `${section.title}: ${sectionText}${routeInfo}`, steps: [], navigation: sectionRoute };
     }
   }
 
   if (intent === 'where_is') {
     const routeInfo = navigation ? ` You can find it at \`${navigation}\`.` : '';
-    const para = topChunk.split('\n\n').find(p => p.length > 40) ?? topChunk.slice(0, 300);
+    const para = topChunk.split('\n\n').find(p => p.length > 40 && !/^#{1,6}\s/.test(p)) ?? topChunk.slice(0, 300);
     return { text: para.replace(/^#+\s*/gm, '').trim() + routeInfo, steps: [], navigation };
   }
 
@@ -324,7 +391,7 @@ function assembleBM25Answer(
   }
 
   if (intent === 'what_is') {
-    const para = topChunk.split('\n\n').find(p => p.length > 40) ?? topChunk.slice(0, 400);
+    const para = topChunk.split('\n\n').find(p => p.length > 40 && !/^#{1,6}\s/.test(p)) ?? topChunk.slice(0, 400);
     return { text: para.replace(/^#+\s*/gm, '').trim(), steps: [], navigation };
   }
 
@@ -333,15 +400,14 @@ function assembleBM25Answer(
       .filter(l => /^[-*•]\s/.test(l) || /^\|\s/.test(l))
       .slice(0, 15)
       .map(l => l.replace(/^[-*•]\s/, '').trim())
-      .filter(l => l.length > 2);
+      .filter(l => l.length > 2 && !/^\|[-\s|]+\|$/.test(l));
     if (bullets.length > 0) {
       const para = topChunk.split('\n').find(l => !l.startsWith('#') && l.trim().length > 30) ?? '';
       return { text: para.trim(), steps: bullets, navigation };
     }
   }
 
-  const paras = topChunk.split('\n\n').filter(p => p.trim().length > 30);
-  return { text: paras.slice(0, 2).join('\n\n').replace(/^#+\s*/gm, '').trim(), steps: [], navigation };
+  return { text: paragraphsOf(topChunk).slice(0, 2).join('\n\n').trim() || topChunk.split('\n')[0].replace(/^#+\s*/, ''), steps: [], navigation };
 }
 
 // Map new intents → legacy BM25 assembly intent
@@ -353,7 +419,10 @@ function toLegacyIntent(intent: string): LegacyIntent {
 
 // ── Handler: live data query ──────────────────────────────────────────────────
 
+const SEE_ALL_APPOINTMENTS = 'Your account can see only your own appointments. Open **Appointments** to see them.';
+
 function handleListAppointments(date: string, user: AuthPayload): LocalAnswerResult {
+  if (!can(user.role, 'appointments:read')) return makeResult({ type: 'text', answer: SEE_ALL_APPOINTMENTS, intent: 'live_data_query' });
   type ApptRow = { bookingRef: string; startTime: string; status: string; serviceName: string; staffName: string; customerName: string };
   const appts = db.prepare(`
     SELECT a.booking_ref AS bookingRef, a.start_time AS startTime, a.status,
@@ -367,20 +436,19 @@ function handleListAppointments(date: string, user: AuthPayload): LocalAnswerRes
     ORDER BY a.start_time LIMIT 20
   `).all(user.orgId, date) as ApptRow[];
 
-  const d = new Date(date + 'T00:00:00');
-  const fmt = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const fmt = longDate(date);
 
   if (!appts.length) {
     return makeResult({
       type: 'live_data',
-      answer: `No appointments scheduled for **${fmt}**. You can [create an appointment](/appointments/new) or check a different date.`,
+      answer: `No appointments are booked for **${fmt}**. You can [create an appointment](/appointments/new) or check a different date.`,
       intent: 'live_data_query',
       liveData: { total: 0, date },
     });
   }
 
   const lines = appts.map(a =>
-    `- **${a.startTime}** — ${a.serviceName} · ${a.staffName} · ${a.customerName} [${a.status}]`
+    `- **${a.startTime}** — ${a.customerName} · ${a.serviceName} · ${a.staffName} (${statusLabel(a.status)})`
   );
   const answer = `**${appts.length} appointment${appts.length !== 1 ? 's' : ''}** on **${fmt}**:\n\n${lines.join('\n')}`;
 
@@ -392,83 +460,53 @@ function handleListAppointments(date: string, user: AuthPayload): LocalAnswerRes
   });
 }
 
+/** The dates a router timeframe covers, counted from the business's today. */
+function timeframeRange(timeframe: string | undefined, today: string): { from: string; to: string; label: string } {
+  const named: Record<string, SummaryPeriod> = { today: 'today', this_week: 'this_week', this_month: 'this_month', '7d': 'last_7_days' };
+  if (timeframe && named[timeframe]) return periodRange(named[timeframe], today);
+  if (timeframe === 'last_month') {
+    const lastOfPrevious = shiftDate(`${today.slice(0, 7)}-01`, -1);
+    return { from: `${lastOfPrevious.slice(0, 7)}-01`, to: lastOfPrevious, label: 'last month' };
+  }
+  if (timeframe === '3m') return { from: shiftDate(today, -89), to: today, label: 'in the last 3 months' };
+  if (timeframe === '1y') return { from: shiftDate(today, -364), to: today, label: 'in the last year' };
+  return periodRange('last_30_days', today);
+}
+
 function handleLiveData(query: string, timeframe: string | undefined, date: string | undefined, listMode: boolean | undefined, user: AuthPayload): LocalAnswerResult {
+  // "Tomorrow" and "today" are the business's dates, not the server's.
+  const today = todayInTimezone(getOrgTimezone(user.orgId));
+  const businessDate = extractDate(query, today) ?? date;
+
   // "show my bookings for tomorrow" → list mode with specific date
-  if (listMode && date) {
-    return handleListAppointments(date, user);
+  if (listMode && businessDate) {
+    return handleListAppointments(businessDate, user);
   }
+  if (!can(user.role, 'appointments:read')) return makeResult({ type: 'text', answer: SEE_ALL_APPOINTMENTS, intent: 'live_data_query' });
 
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
+  const range = timeframe === 'specific_date' && businessDate
+    ? { from: businessDate, to: businessDate, label: `on ${longDate(businessDate)}` }
+    : timeframeRange(timeframe, today);
+  const counts = appointmentCounts(user.orgId, range.from, range.to);
 
-  let dateStart: string;
-  let dateEnd: string;
-  let periodLabel: string;
-
-  if (timeframe === 'this_month') {
-    dateStart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
-    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    dateEnd = `${nextMonth.getFullYear()}-${pad(nextMonth.getMonth() + 1)}-01`;
-    periodLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  } else if (timeframe === 'this_week') {
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - (now.getDay() || 7) + 1);
-    dateStart = `${monday.getFullYear()}-${pad(monday.getMonth() + 1)}-${pad(monday.getDate())}`;
-    const sunday = new Date(monday); sunday.setDate(monday.getDate() + 7);
-    dateEnd = `${sunday.getFullYear()}-${pad(sunday.getMonth() + 1)}-${pad(sunday.getDate())}`;
-    periodLabel = 'this week';
-  } else if (timeframe === 'today' || timeframe === 'specific_date') {
-    const targetDate = date ?? `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    const tomorrow = new Date(targetDate + 'T00:00:00'); tomorrow.setDate(tomorrow.getDate() + 1);
-    dateStart = targetDate;
-    dateEnd = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`;
-    periodLabel = timeframe === 'today' ? 'today' : new Date(targetDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-  } else {
-    // Default to last 30 days
-    const days = timeframe === '7d' ? 7 : timeframe === '3m' ? 90 : timeframe === '1y' ? 365 : 30;
-    const since = new Date(now.getTime() - days * 86_400_000);
-    dateStart = `${since.getFullYear()}-${pad(since.getMonth() + 1)}-${pad(since.getDate())}`;
-    dateEnd = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate() + 1)}`;
-    periodLabel = `last ${days} days`;
-  }
-
-  type Row = { total: number; scheduled: number; completed: number; cancelled: number; revenue: number };
-  const stats = db.prepare(`
-    SELECT
-      COUNT(*) as total,
-      SUM(CASE WHEN status = 'scheduled' THEN 1 ELSE 0 END) as scheduled,
-      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
-      SUM(CASE WHEN status != 'cancelled' THEN price ELSE 0 END) as revenue
-    FROM appointments
-    WHERE organization_id = ? AND date >= ? AND date < ?
-  `).get(user.orgId, dateStart, dateEnd) as Row;
-
-  const total = stats.total ?? 0;
-  const scheduled = stats.scheduled ?? 0;
-  const completed = stats.completed ?? 0;
-  const cancelled = stats.cancelled ?? 0;
-  const revenue = stats.revenue ?? 0;
-
-  let answer = `You have **${total} appointment${total !== 1 ? 's' : ''}** ${periodLabel}.`;
-  if (total > 0) {
+  let answer = `You have **${counts.total} appointment${counts.total !== 1 ? 's' : ''}** ${range.label}.`;
+  if (counts.total > 0) {
     const parts: string[] = [];
-    if (scheduled > 0) parts.push(`${scheduled} scheduled`);
-    if (completed > 0) parts.push(`${completed} completed`);
-    if (cancelled > 0) parts.push(`${cancelled} cancelled`);
+    if (counts.scheduled > 0) parts.push(`${counts.scheduled} scheduled`);
+    if (counts.completed > 0) parts.push(`${counts.completed} completed`);
+    if (counts.cancelled > 0) parts.push(`${counts.cancelled} cancelled`);
+    if (counts.noShow > 0) parts.push(`${counts.noShow} no-show`);
     if (parts.length > 0) answer += ` (${parts.join(', ')})`;
-    if (revenue > 0) {
-      const orgRow = db.prepare('SELECT currency FROM organizations WHERE id = ?').get(user.orgId) as { currency?: string } | undefined;
-      const cur = orgRow?.currency ?? DEFAULT_CURRENCY;
-      answer += `. Revenue: **${cur} ${revenue.toFixed(2)}**.`;
-    }
+  }
+  if (/\b(revenue|money|income|earn\w*|sales)\b/i.test(query)) {
+    answer += '\n\nWorkEasy360 Booking does not record prices or revenue: customers pay the business directly.';
   }
 
   return makeResult({
     type: 'live_data',
     answer,
     intent: 'live_data_query',
-    liveData: { total, scheduled, completed, cancelled, revenue, period: periodLabel },
+    liveData: { ...counts, from: range.from, to: range.to, period: range.label },
   });
 }
 
@@ -483,7 +521,7 @@ function handleAvailability(
   if (!date) {
     return makeResult({
       type: 'clarification',
-      answer: 'Which date would you like to check availability for? For example: "Show me available slots for tomorrow" or "Check availability for 2026-10-25".',
+      answer: 'Which date would you like to check? For example: "Show me available slots for tomorrow" or "Check availability for 2026-10-25".',
       intent: 'availability_query',
       clarificationQuestion: 'Which date would you like to check?',
     });
@@ -493,7 +531,7 @@ function handleAvailability(
   if (date < today) {
     return makeResult({
       type: 'error',
-      answer: `I can't check availability for past dates. Please choose today (${today}) or a future date.`,
+      answer: `I can't check free times for past dates. Please choose today (${today}) or a later date.`,
       intent: 'availability_query',
     });
   }
@@ -532,13 +570,13 @@ function handleAvailability(
 
     return makeResult({
       type: 'workflow_blocker',
-      answer: "I can't check availability yet because no active services are configured. I can help you create one first.",
+      answer: "I can't show free times yet because there is no active service. Add one in **Settings → Services** (a name and a duration), then ask again.",
       intent: 'availability_query',
       workflowInfo: {
         workflowId,
         reason: 'no_services',
         actions: [
-          { label: 'Create a service', style: 'primary', intent: 'navigate', navigateTo: '/services/new' },
+          { label: 'Add a service', style: 'primary', intent: 'navigate', navigateTo: '/settings/services' },
           { label: 'Cancel', style: 'secondary', intent: 'cancel_workflow' },
         ],
       },
@@ -557,21 +595,18 @@ function handleAvailability(
     }
   }
 
+  const fmt = longDate(date);
   if (!allSlots.length) {
-    const d = new Date(date + 'T00:00:00');
-    const fmt = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
     return makeResult({
       type: 'availability',
-      answer: `No available slots found for **${fmt}**. All staff may be unavailable or fully booked on that day. Try checking a different date or adding more staff.`,
+      answer: `No free times on **${fmt}**. The business may be closed, the staff may be off or fully booked. Try another date, or check the working hours and date exceptions in **Availability**.`,
       intent: 'availability_query',
       slots: [],
     });
   }
 
-  const d = new Date(date + 'T00:00:00');
-  const fmt = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
   const lines = allSlots.map(s => `**${s.staffName}**: ${s.times.slice(0, 8).join(', ')}${s.times.length > 8 ? ` (+${s.times.length - 8} more)` : ''}`);
-  const answer = `Available slots for **${fmt}**:\n\n${lines.join('\n')}`;
+  const answer = `Free times on **${fmt}**:\n\n${lines.join('\n')}`;
 
   return makeResult({
     type: 'availability',
@@ -588,42 +623,24 @@ function handleRecordSearch(
   searchQuery: string,
   user: AuthPayload,
 ): LocalAnswerResult {
-  const q = searchQuery.toLowerCase().trim();
-  let results: Array<Record<string, unknown>> = [];
-
-  if (recordType === 'customers') {
-    results = q
-      ? db.prepare(`SELECT id, name, email, phone, ${CUSTOMER_BOOKING_COUNT} as totalBookings FROM customers WHERE organization_id = ? AND (LOWER(name) LIKE ? OR LOWER(email) LIKE ?) ORDER BY name LIMIT 10`).all(user.orgId, `%${q}%`, `%${q}%`) as typeof results
-      : db.prepare(`SELECT id, name, email, phone, ${CUSTOMER_BOOKING_COUNT} as totalBookings FROM customers WHERE organization_id = ? ORDER BY name LIMIT 10`).all(user.orgId) as typeof results;
-  } else if (recordType === 'staff') {
-    results = q
-      ? db.prepare(`SELECT id, name, email, role, title, is_active as isActive FROM staff WHERE organization_id = ? AND (LOWER(name) LIKE ? OR LOWER(email) LIKE ?) ORDER BY name LIMIT 10`).all(user.orgId, `%${q}%`, `%${q}%`) as typeof results
-      : db.prepare(`SELECT id, name, email, role, title, is_active as isActive FROM staff WHERE organization_id = ? ORDER BY name LIMIT 10`).all(user.orgId) as typeof results;
-  } else if (recordType === 'services') {
-    results = q
-      ? db.prepare(`SELECT id, name, duration, price, currency, category FROM services WHERE organization_id = ? AND LOWER(name) LIKE ? ORDER BY name LIMIT 10`).all(user.orgId, `%${q}%`) as typeof results
-      : db.prepare(`SELECT id, name, duration, price, currency, category FROM services WHERE organization_id = ? ORDER BY name LIMIT 10`).all(user.orgId) as typeof results;
-  } else if (recordType === 'appointments') {
-    results = db.prepare(`
-      SELECT a.id, a.booking_ref as bookingRef, a.date, a.start_time as startTime,
-             a.status, s.name as serviceName, st.name as staffName, c.name as customerName
-      FROM appointments a
-      JOIN services s ON a.service_id = s.id
-      JOIN staff st ON a.staff_id = st.id
-      JOIN customers c ON a.customer_id = c.id
-      WHERE a.organization_id = ?
-        AND (LOWER(c.name) LIKE ? OR LOWER(s.name) LIKE ? OR a.booking_ref LIKE ?)
-      ORDER BY a.date DESC LIMIT 10
-    `).all(user.orgId, `%${q}%`, `%${q}%`, `%${q}%`) as typeof results;
-  }
-
+  const allowed = recordType === 'customers' ? can(user.role, 'customers:read')
+    : recordType === 'appointments' ? can(user.role, 'appointments:read')
+    : can(user.role, 'catalog:read');
   const label = recordType === 'customers' ? 'customer' : recordType === 'staff' ? 'staff member'
     : recordType === 'services' ? 'service' : 'appointment';
+  if (!allowed) {
+    return makeResult({ type: 'text', answer: `Your account cannot look up ${label}s.`, intent: 'record_search' });
+  }
+
+  const results = recordType === 'customers' ? findCustomers(user.orgId, searchQuery)
+    : recordType === 'staff' ? findStaff(user.orgId, searchQuery)
+    : recordType === 'services' ? findServices(user.orgId, searchQuery)
+    : findAppointments(user.orgId, searchQuery);
 
   if (!results.length) {
     const emptyMsg = searchQuery
-      ? `No ${label}s found matching **"${searchQuery}"** in your organization. Try a different name or check the spelling.`
-      : `No ${label}s found in your organization.`;
+      ? `No ${label}s found matching **"${searchQuery}"**. Try a different name or check the spelling.`
+      : `No ${label}s found in your business yet.`;
     return makeResult({
       type: 'search_results',
       answer: emptyMsg,
@@ -634,14 +651,17 @@ function handleRecordSearch(
 
   // Build human-readable answer
   const lines = results.map(r => {
-    if (recordType === 'customers') return `- **${r.name}** — ${r.email}${r.phone ? ` · ${r.phone}` : ''}`;
-    if (recordType === 'staff') return `- **${r.name}** (${r.role})${r.title ? ` — ${r.title}` : ''}`;
-    if (recordType === 'services') return `- **${r.name}** — ${r.duration} min, ${r.currency} ${r.price}`;
-    return `- **${r.customerName}** — ${r.serviceName} on ${r.date} at ${r.startTime} [${r.status}]`;
+    if (recordType === 'customers') {
+      const contact = [r.phone, r.email].filter(Boolean).join(' · ') || 'no contact details';
+      return `- **${r.name}** — ${contact}`;
+    }
+    if (recordType === 'staff') return `- **${r.name}**${r.email ? ` — ${r.email}` : ''}${r.isActive ? '' : ' (inactive)'}`;
+    if (recordType === 'services') return `- **${r.name}** — ${r.duration} min${r.isActive ? '' : ' (inactive)'}`;
+    return `- **${r.customerName}** — ${r.serviceName} with ${r.staffName} on ${r.date} at ${r.startTime} (${r.status})`;
   });
   const countLabel = searchQuery
     ? `Found **${results.length} ${label}${results.length !== 1 ? 's' : ''}** matching "${searchQuery}":`
-    : `**${results.length} ${label}${results.length !== 1 ? 's' : ''}** in your organization:`;
+    : `**${results.length} ${label}${results.length !== 1 ? 's' : ''}** in your business:`;
   const answer = `${countLabel}\n\n${lines.join('\n')}`;
 
   return makeResult({
@@ -654,6 +674,8 @@ function handleRecordSearch(
 
 // ── Handler: action request (service creation proposal) ───────────────────────
 
+const SERVICE_EXAMPLE = 'For example: "Create a 30-minute consultation service".';
+
 function handleActionRequest(
   query: string,
   entities: Record<string, unknown>,
@@ -665,71 +687,61 @@ function handleActionRequest(
   if (!can(user.role, 'services:write')) {
     return makeResult({
       type: 'text',
-      answer: 'Your account does not have permission to create services. Ask an administrator of your business to do it.',
+      answer: 'Your account does not have permission to add services. Ask the owner of your business to do it in **Settings → Services**.',
       intent: 'action_request',
     });
   }
 
-  // Currently supports: create service
+  // The local assistant prepares services only; appointments and customers are added on their own screens.
   if (feature !== 'service' && !/(service|treatment|offering)/i.test(query)) {
     return makeResult({
       type: 'clarification',
-      answer: 'I can prepare creation proposals for services. What would you like to create? Please provide the name, duration, and price.',
+      answer: `I can prepare a new service for you to confirm: tell me its name and duration. ${SERVICE_EXAMPLE} `
+        + 'To book an appointment, use **New Appointment** on Appointments; to add a customer, use **Add Customer** on Customers.',
       intent: 'action_request',
-      clarificationQuestion: 'What would you like to create? (name, duration, price)',
+      clarificationQuestion: 'What is the name and duration of the service?',
     });
   }
 
   const duration = entities.duration as number | undefined ?? extractDuration(query);
-  const priceInfo = typeof entities.price === 'number' ? { price: entities.price as number, currency: (entities.currency as string) ?? DEFAULT_CURRENCY } : extractPrice(query);
-  const serviceName = entities.serviceName as string | undefined ?? extractServiceName(query) ?? 'New Service';
+  const serviceName = toTitleCase((entities.serviceName as string | undefined ?? extractServiceName(query) ?? 'New Service').trim());
+  const priceGiven = typeof entities.price === 'number' || !!extractPrice(query);
 
   if (!duration) {
     return makeResult({
       type: 'clarification',
-      answer: `To create the **${serviceName}** service, I need the duration. How long should each session be? (e.g., 30 minutes, 1 hour)`,
+      answer: `To create the **${serviceName}** service, I need its duration. How long is each appointment? (for example 30 minutes or 1 hour)`,
       intent: 'action_request',
       clarificationQuestion: 'What is the duration (in minutes)?',
     });
   }
-
-  if (!priceInfo) {
+  if (!Number.isInteger(duration) || duration < 5 || duration > 1440) {
     return makeResult({
       type: 'clarification',
-      answer: `To create the **${serviceName}** service (${duration} min), what is the price per session? (e.g., ₹500, $50, or 0 for free)`,
+      answer: 'A service lasts between 5 and 1440 whole minutes. What duration should it have?',
       intent: 'action_request',
-      clarificationQuestion: 'What is the price?',
+      clarificationQuestion: 'What is the duration (in minutes)?',
     });
   }
-
-  // Detect category from service name
-  const catMap: Record<string, string> = {
-    consultation: 'consultation', consult: 'consultation',
-    class: 'class', session: 'session', workshop: 'workshop',
-    tour: 'tour', rental: 'rental',
-  };
-  const lowerName = serviceName.toLowerCase();
-  const category = Object.keys(catMap).find(k => lowerName.includes(k))
-    ? catMap[Object.keys(catMap).find(k => lowerName.includes(k))!]
-    : 'consultation';
+  if (db.prepare('SELECT 1 FROM services WHERE organization_id = ? AND LOWER(name) = LOWER(?)').get(user.orgId, serviceName)) {
+    return makeResult({
+      type: 'text',
+      answer: `A service called **${serviceName}** already exists. You can change it in **Settings → Services** with **Edit**.`,
+      intent: 'action_request',
+      navigation: '/settings/services',
+    });
+  }
 
   const displayData = {
     type: 'Create Service',
     fields: [
-      { label: 'Name', value: toTitleCase(serviceName) },
+      { label: 'Name', value: serviceName },
       { label: 'Duration', value: `${duration} minutes` },
-      { label: 'Price', value: `${priceInfo.currency} ${priceInfo.price}` },
-      { label: 'Category', value: category },
+      { label: 'Offered by', value: 'Every active team member' },
     ] as Array<{ label: string; value: unknown }>,
   };
 
-  const inputData = {
-    name: toTitleCase(serviceName),
-    duration,
-    price: priceInfo.price,
-    category,
-    currency: priceInfo.currency,
-  };
+  const inputData = { name: serviceName, duration };
 
   // Ensure we have a valid conversation_id (the schema enforces NOT NULL + FK)
   let convId = conversationId;
@@ -763,9 +775,9 @@ function handleActionRequest(
     VALUES (?, ?, ?, ?, ?, 'proposal_created', 'propose_create_service', ?)
   `).run(`audit-${nanoid(10)}`, user.orgId, user.sub, convId, proposalId, JSON.stringify(inputData));
 
-  const priceStr = priceInfo.currency === 'INR' ? `₹${priceInfo.price}` : `${priceInfo.currency} ${priceInfo.price}`;
-  const answer = `I've prepared a service creation request. Review the details below and **Confirm** to create it, or **Cancel** to discard.\n\n`
-    + `**${toTitleCase(serviceName)}** · ${duration} minutes · ${priceStr}`;
+  const answer = `I've prepared a new service. Review the details below and **Confirm** to create it, or **Cancel** to discard.\n\n`
+    + `**${serviceName}** · ${duration} minutes · offered by every active team member (change this in **Settings → Team**).`
+    + (priceGiven ? '\n\nServices in WorkEasy360 Booking have no price: customers pay the business directly, so the price was left out.' : '');
 
   return makeResult({
     type: 'action_proposal',
@@ -805,11 +817,17 @@ function checkAndResumeWorkflow(user: AuthPayload): LocalAnswerResult | null {
 
   const ctx = JSON.parse(pending.context) as { date?: string };
   const result = handleAvailability(ctx.date, user);
-  result.answer = `I noticed you've set up services! Let me resume checking availability for your earlier request.\n\n${result.answer}`;
+  result.answer = `You have set up services now. Here is the availability for your earlier request.\n\n${result.answer}`;
   return result;
 }
 
 // ── Main entry point ──────────────────────────────────────────────────────────
+
+const GREETING = "Hi! I'm Workeasy Ai Agent. Ask me about appointments, availability, customers, services, your team, "
+  + 'your booking link or settings, or ask me to find a customer, show free times or open a screen.';
+
+const OUT_OF_SCOPE = 'That question is outside my WorkEasy360 knowledge. I can help with appointments, availability, customers, '
+  + 'services, your team, notifications and settings.\n\nTry asking:\n- How do I add a staff member?\n- How do I block a holiday?\n- How do I send appointment reminders?';
 
 export async function localAnswer(
   query: string,
@@ -834,33 +852,24 @@ export async function localAnswer(
     if (resumed) return resumed;
   }
 
-  const { intent, entities, featureCategories, confidence } = routeIntent(query);
+  const { intent, entities, featureCategories } = routeIntent(query);
 
   // Greeting / vague
   if (intent === 'greeting') {
-    return makeResult({
-      type: 'text',
-      answer: "Hi! I'm Workeasy Ai Agent. Ask me anything about appointments, services, staff, customers, settings, or reports.",
-      intent: 'greeting',
-      confidence: 'high',
-    });
+    return makeResult({ type: 'text', answer: GREETING, intent: 'greeting', confidence: 'high' });
   }
 
   // Out of scope
   if (intent === 'out_of_scope') {
-    return makeResult({
-      type: 'out_of_scope',
-      answer: "That question is outside my WorkEasy360 knowledge. I can help with appointments, services, staff, customers, settings, reports, or integrations.\n\nTry asking:\n- How do I add a staff member?\n- What reports are available?\n- How to set up email reminders?",
-      intent: 'out_of_scope',
-      confidence: 'high',
-    });
+    return makeResult({ type: 'out_of_scope', answer: OUT_OF_SCOPE, intent: 'out_of_scope', confidence: 'high' });
   }
 
-  // Navigation (no auth needed)
+  // Navigation (no auth needed). A screen of an earlier version opens the screen that replaces it, with a note.
   if (intent === 'navigation' && entities.routePath) {
+    const opening = `Taking you to **${entities.routeTitle}**…`;
     return makeResult({
       type: 'navigation',
-      answer: `Taking you to **${entities.routeTitle}**…`,
+      answer: entities.routeNote ? `${entities.routeNote}\n\n${opening}` : opening,
       intent: 'navigation',
       navigateTo: entities.routePath,
       navigationTitle: entities.routeTitle,
@@ -898,11 +907,8 @@ export async function localAnswer(
   // Clarification needed
   if (intent === 'clarification_needed') {
     const feature = entities.feature;
-    const hint = feature ? ` about ${feature}` : '';
-    const suggestions = feature && FEATURE_SUGGESTIONS[feature]
-      ? FEATURE_SUGGESTIONS[feature]
-      : DEFAULT_SUGGESTIONS;
-    const suggestionList = suggestions.map(s => `- ${s}`).join('\n');
+    const hint = feature && SUGGESTIONS[feature] ? ` about ${feature === 'staff' ? 'your team' : `${feature}s`}` : '';
+    const suggestionList = suggestionsFor(feature).map(s => `- ${s}`).join('\n');
     return makeResult({
       type: 'clarification',
       answer: `Could you be more specific${hint}? Here are some things I can help with:\n\n${suggestionList}`,
@@ -931,7 +937,7 @@ function bm25Answer(
     if (!fallback.length) {
       return makeResult({
         type: 'text',
-        answer: "I don't have information about that in the WorkEasy360 knowledge base. Try rephrasing your question.",
+        answer: "I don't have information about that in the WorkEasy360 Booking help articles. Try rephrasing your question.",
         intent,
         noResults: true,
         confidence: 'low',
@@ -954,11 +960,7 @@ function bm25FromChunks(
 
   // Low confidence: don't dump a potentially wrong guide — suggest related topics instead
   if (confidence === 'low') {
-    const primaryCategory = chunks[0]?.category;
-    const suggestions = primaryCategory && FEATURE_SUGGESTIONS[primaryCategory]
-      ? FEATURE_SUGGESTIONS[primaryCategory]
-      : DEFAULT_SUGGESTIONS;
-    const suggestionList = suggestions.map(s => `- ${s}`).join('\n');
+    const suggestionList = suggestionsFor(chunks[0]?.category).map(s => `- ${s}`).join('\n');
     return makeResult({
       type: 'text',
       answer: `I don't have specific information about that. Here are some related topics that might help:\n\n${suggestionList}`,
@@ -975,10 +977,11 @@ function bm25FromChunks(
     if (/\bwhere\b/i.test(query)) return 'where_is' as LegacyIntent;
     if (/\bwhy\b|\bnot\s+working\b|\berror\b/i.test(query)) return 'troubleshoot' as LegacyIntent;
     if (/\bwhat\s+is\b|\bwhat\s+are\b/i.test(query)) return 'what_is' as LegacyIntent;
-    if (/\blist\b|\ball\b/i.test(query)) return 'list' as LegacyIntent;
+    if (/\blist\b/i.test(query)) return 'list' as LegacyIntent;
     return toLegacyIntent(intent);
   })();
 
+  chunks = chooseArticle(chunks, query, legacyIntent === 'troubleshoot' ? 'troubleshooting' : undefined);
   const { text, steps, navigation } = assembleBM25Answer(legacyIntent, chunks, query);
 
   // Deduplicate sources
@@ -1003,4 +1006,3 @@ function bm25FromChunks(
     noResults: false,
   };
 }
-

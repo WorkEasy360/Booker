@@ -8,33 +8,19 @@ export type Permission =
   | 'workspaces:write' | 'staff:manage' | 'settings:write' | 'ai:use' | 'ai:admin';
 
 const VIEW_APPOINTMENTS: Permission[] = ['appointments:read', 'appointments:read_own'];
-// Business set-up pages are for people who run the business, not for staff sign-ins.
-const RUN_BUSINESS: Permission[] = ['appointments:read'];
 
 /** Most specific first; the first matching pattern decides. Any one listed permission opens the page. */
 const ROUTES: Array<{ pattern: RegExp; any: Permission[] | 'everyone' }> = [
-  { pattern: /^\/dashboard/, any: ['reports:read'] },
-  { pattern: /^\/my-space/, any: VIEW_APPOINTMENTS },
   { pattern: /^\/appointments\/new/, any: ['appointments:write'] },
-  { pattern: /^\/appointments\/[^/]+\/reschedule/, any: ['appointments:write'] },
+  { pattern: /^\/appointments\/[^/]+\/(reschedule|edit)/, any: ['appointments:write'] },
   { pattern: /^\/appointments/, any: VIEW_APPOINTMENTS },
-  { pattern: /^\/calendar/, any: VIEW_APPOINTMENTS },
-  { pattern: /^\/workspaces\/(new|[^/]+\/edit)/, any: ['workspaces:write'] },
-  { pattern: /^\/workspaces/, any: RUN_BUSINESS },
-  { pattern: /^\/services\/(new|[^/]+\/edit)/, any: ['services:write'] },
-  { pattern: /^\/services/, any: RUN_BUSINESS },
-  { pattern: /^\/staff\/(new|[^/]+\/edit)/, any: ['staff:manage'] },
-  { pattern: /^\/staff/, any: RUN_BUSINESS },
-  { pattern: /^\/resources\/(new|[^/]+\/edit)/, any: ['resources:write'] },
-  { pattern: /^\/resources/, any: RUN_BUSINESS },
-  { pattern: /^\/customers\/new/, any: ['customers:write'] },
+  // Staff see and manage their own availability; owners manage everyone's.
+  { pattern: /^\/availability/, any: ['staff:manage', 'settings:write', 'appointments:write', 'appointments:read_own'] },
+  { pattern: /^\/customers\/(new|[^/]+\/edit)/, any: ['customers:write'] },
   { pattern: /^\/customers/, any: ['customers:read'] },
-  { pattern: /^\/booking-pages/, any: ['booking_pages:write'] },
-  { pattern: /^\/notifications/, any: ['emails:send'] },
-  { pattern: /^\/integrations/, any: ['settings:write'] },
-  { pattern: /^\/reports/, any: ['reports:read'] },
-  // Everyone can open Settings: people without settings:write only see their own account (password, sessions).
+  // Everyone can open Settings: people without settings:write see only the sections their role can use.
   { pattern: /^\/settings/, any: 'everyone' },
+  { pattern: /^\/account/, any: 'everyone' },
 ];
 
 export function hasPermission(perms: readonly string[] | undefined, p: Permission): boolean {
@@ -48,9 +34,18 @@ export function canOpen(perms: readonly string[] | undefined, pathname: string):
   return rule.any.some(p => hasPermission(perms, p));
 }
 
-/** Where to land after signing in. */
+/** Where to land after signing in: Appointments is the home screen. */
 export function homePath(perms: readonly string[] | undefined): string {
-  if (hasPermission(perms, 'reports:read')) return '/dashboard';
-  if (VIEW_APPOINTMENTS.some(p => hasPermission(perms, p))) return '/my-space';
+  if (VIEW_APPOINTMENTS.some(p => hasPermission(perms, p))) return '/appointments';
   return '/settings';
+}
+
+/** Display name of a sign-in role ("admin" is the business owner). */
+export function roleLabel(role: string | undefined | null): string {
+  switch (role) {
+    case 'admin': case 'owner': return 'Owner';
+    case 'manager': return 'Manager';
+    case 'staff': return 'Staff';
+    default: return role ? role.charAt(0).toUpperCase() + role.slice(1) : '';
+  }
 }

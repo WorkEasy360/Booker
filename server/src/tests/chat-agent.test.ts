@@ -36,6 +36,7 @@ beforeAll(() => {
   db.prepare("DELETE FROM ai_knowledge_chunks").run();
   db.prepare("DELETE FROM ai_knowledge_docs").run();
 
+  // V4: four menus (Appointments with its calendar view, Availability, Customers, Settings) and My Account.
   const docs = [
     {
       id: 'ca-appt',
@@ -44,37 +45,56 @@ beforeAll(() => {
       content: `# Appointments Guide
 Creating a new appointment:
 1. Go to Appointments at /appointments/new
-2. Select a Service from the dropdown
-3. Select a Staff Member
+2. Find or add the Customer
+3. Select a Service and, when more than one person offers it, the Staff member
 4. Pick a date (cannot be in the past)
-5. Select a time slot
-6. Select or add a Customer
-7. Click Create Appointment
+5. Click one of the Available times
+6. Click Save Appointment
 
-Rescheduling: open the appointment and click Edit. Change the date or time. Save.
-Cancelling: open the appointment and click Cancel. Confirm the cancellation.
+Rescheduling: open the appointment and click Reschedule. Choose a new time. Click Confirm New Time.
+Cancelling: open the appointment and click Cancel. Confirm with Cancel Appointment.
+The calendar is the Calendar view of Appointments at /appointments?view=calendar.
 Business rules: cannot create appointments in the past.`,
     },
     {
       id: 'ca-staff',
-      title: 'Staff Guide',
+      title: 'Team Guide',
       category: 'staff',
-      content: `# Staff Guide
+      content: `# Team Guide
 
 ## Adding a new staff member
-1. Go to Staff at /staff/new
-2. Enter their Full Name (required)
-3. Enter their Email (required)
-4. Assign to workspaces and services
-5. Click Create Staff
+1. Go to Settings → Team at /settings/team
+2. Click Add Staff
+3. Enter their Name and Email (required)
+4. Tick their Assigned services
+5. Click Save
 
-## Staff working hours
+## Inviting a team member to sign in
+1. Go to Settings → Team at /settings/team
+2. Click Login access next to the staff member
+3. Choose the Sign-in role: Owner or Staff
+4. Click Send invitation
+
+Sign-in roles: Owner, Staff.`,
+    },
+    {
+      id: 'ca-availability',
+      title: 'Availability Guide',
+      category: 'availability',
+      content: `# Availability Guide
+Availability is at /availability.
+
+## Setting a staff member's working hours
 To set working hours for a staff member:
-1. In the staff form, scroll to Working Hours
-2. Toggle on each day the staff member works
-3. Set start and end time for each active day
+1. Open Availability and choose the staff member in Showing
+2. Toggle each day Open or Closed
+3. Set start and end time for each open day
+4. Click Save Working Hours
 
-Staff roles: Admin, Manager, Staff.`,
+## Blocking a holiday
+1. Open Availability and choose Business hours
+2. Click Add Exception and choose Block full day
+3. Click Add Exception`,
     },
     {
       id: 'ca-services',
@@ -82,15 +102,13 @@ Staff roles: Admin, Manager, Staff.`,
       category: 'services',
       content: `# Services Guide
 Creating a new service:
-1. Go to Services at /services/new
-2. Enter the service name (required)
-3. Set the duration (15–480 minutes)
-4. Set the price (0 or more)
-5. Choose a category: Consultation, Treatment, Class, Meeting, Other
-6. Assign staff members
-7. Click Create Service
+1. Go to Settings → Services at /settings/services
+2. Click Add Service
+3. Enter the service name (required)
+4. Enter the duration in minutes (5–1440)
+5. Click Save
 
-Service categories: consultation, treatment, class, meeting, other.`,
+Services have a name and a duration only; there are no prices.`,
     },
     {
       id: 'ca-customers',
@@ -98,117 +116,74 @@ Service categories: consultation, treatment, class, meeting, other.`,
       category: 'customers',
       content: `# Customers Guide
 Adding a customer:
-1. Go to Customers at /customers/new
-2. Enter the Full Name (required)
-3. Enter the Email (required)
-4. Optionally add Phone, Timezone, Tags, Notes
-5. Click Create Customer
+1. Go to Customers at /customers and click Add Customer
+2. Enter the Name (required)
+3. Enter a Phone number or an Email address (at least one)
+4. Click Add Customer
 
-Searching customers: go to /customers and use the search bar to filter by name or email.`,
+Searching customers: go to /customers and search by name, phone or email.`,
     },
     {
-      id: 'ca-settings',
-      title: 'Settings Guide',
-      category: 'settings',
-      content: `# Settings Guide
-Settings are at /settings. Tabs: Business Profile, Security, Working Hours, Notifications.
+      id: 'ca-account',
+      title: 'My Account Guide',
+      category: 'account',
+      content: `# My Account Guide
+My Account is at /account.
 
-## Account management
-To delete or deactivate your account:
-1. Contact WorkEasy360 support to request account deletion
-2. Deactivate staff: go to Staff, edit the member, set status to Inactive
-3. Stop accepting bookings: unpublish your Booking Page
+## Deleting your account
+Deleting an account yourself is not available:
+1. Ask WorkEasy360 support to delete the account (Help → Create Ticket)
+2. Deactivate staff: in Settings → Team, switch Active off
+3. Stop accepting bookings: switch off Accept online bookings in Settings → Public Booking
 
-## Security and password
-Change password at /settings/security.
-1. Enter your current password
-2. Enter a new password (min 8 chars, one uppercase, one number)
-3. Confirm the new password
+## Changing your password
+1. Open My Account at /account
+2. Enter your current password
+3. Enter a new password (min 8 chars, one uppercase, one number) and confirm it
 4. Click Update Password
-Two-factor authentication is not yet available.`,
+Two-factor authentication is turned on in the same page.`,
     },
     {
-      id: 'ca-reports',
-      title: 'Reports Guide',
-      category: 'reports',
-      content: `# Reports Guide
-Reports are available at /reports.
+      id: 'ca-limitations',
+      title: 'Known Limitations Guide',
+      category: 'limitations',
+      content: `# Known Limitations Guide
 
-Available report types:
-- Total Appointments: count of all appointments in the selected period
-- Total Revenue: sum of prices from confirmed and completed appointments
-- Cancellation Rate: percentage of appointments cancelled
-- No-show Rate: percentage marked no-show
-- Booking Volume Chart: appointments over time
-- Status Breakdown: pie chart by status
-- Service Performance: most popular services
-- Staff Workload: appointments per staff member
-- Top Customers: top customers by booking count
+## Reports, charts and revenue
+Reports and revenue figures are not available. Appointments shows today's figures and this week's completed and cancelled appointments.
 
-Select a date range: Last 7 days, Last 30 days, Last 3 months, Last year.`,
+## Workspaces and multiple locations
+Workspaces are not available. Team members are added in Settings → Team, with an Owner or Staff sign-in.`,
     },
     {
       id: 'ca-notifications',
       title: 'Notifications Guide',
       category: 'notifications',
       content: `# Notifications Guide
-Notifications are at /notifications.
+Notifications are at /settings/notifications.
 
 ## Email reminders and notification types
-Supported notification types:
-- Booking Confirmation: sent to customers/clients when appointment is created
-- Appointment Reminder: email reminder sent before appointment (e.g., 24 hours before)
-- Cancellation Confirmation: sent when appointment is cancelled
-- Staff Notification: sent to staff when they have a new appointment
+Customers get:
+- Booking confirmation: sent when an appointment is booked
+- Reschedule update: sent when an appointment moves
+- Cancellation update: sent when an appointment is cancelled
+- Reminder (optional): 24 hours before the appointment
 
-## Configuring email reminders for clients
+## Sending email reminders to clients
 To send email reminders to clients:
-1. Go to Notifications at /notifications
-2. Find Appointment Reminder and open it
-3. Set the timing (e.g., 24 hours before appointment)
-4. Enable the notification
-Note: notification template configuration is in development.`,
+1. Go to Settings → Notifications at /settings/notifications
+2. Switch on Reminder 24 hours before
+3. Click Save Changes`,
     },
     {
       id: 'ca-integrations',
       title: 'Integrations Guide',
       category: 'integrations',
       content: `# Integrations Guide
-Integrations are at /integrations.
+Integrations are at /settings/integrations, powered by WorkEasy Connect.
 
-Available integrations:
-- Google Calendar: sync appointments to Google Calendar (in development)
-- Apple Calendar: add appointments to Apple Calendar via .ics
-- Outlook: add to Microsoft Outlook
-- Report export: download reports as CSV/PDF (planned)
-
-To connect Google Calendar:
-1. Go to Integrations at /integrations
-2. Select Google Calendar
-3. Follow the setup steps
-Note: Calendar integrations are currently in development and show a toast notification.`,
-    },
-    {
-      id: 'ca-workspaces',
-      title: 'Workspaces Guide',
-      category: 'workspaces',
-      content: `# Workspaces Guide
-Workspaces represent locations or branches of your business.
-
-## Creating a workspace
-1. Go to Workspaces at /workspaces/new
-2. Enter the name (required)
-3. Add address, phone, timezone
-4. Click Create
-
-## Inviting and assigning team members to a workspace
-To invite or assign staff to a workspace:
-1. Go to Staff at /staff
-2. Open the staff member's profile
-3. Under Workspaces in the sidebar, check the target workspace
-4. Save the staff member
-
-Each staff member can be assigned to multiple workspaces.`,
+Available now: outgoing webhooks for Appointment Created, Rescheduled and Cancelled events.
+Ready-made connectors for Google Calendar, Google Sheets, Pabbly, Zoom and Zapier are Coming Soon.`,
     },
   ];
 
@@ -270,10 +245,11 @@ describe('Phase-8 standard queries', () => {
     expect(r.entities.recordType).toBe('customers');
   });
 
-  it('Q9  "Take me to the reports page" → navigation, /reports', () => {
+  it('Q9  "Take me to the reports page" → navigation to Appointments, Reports removed', () => {
     const r = routeIntent('Take me to the reports page');
     expect(r.intent).toBe('navigation');
-    expect(r.entities.routePath).toBe('/reports');
+    expect(r.entities.routePath).toBe('/appointments');
+    expect(r.entities.routeNote).toMatch(/Reports are not available/);
   });
 
   it('Q10 "What is the capital of France?" → out_of_scope', () => {
@@ -281,10 +257,10 @@ describe('Phase-8 standard queries', () => {
     expect(r.intent).toBe('out_of_scope');
   });
 
-  it('Q11 "How do I change my password?" → platform_how_to, settings', () => {
+  it('Q11 "How do I change my password?" → platform_how_to, My Account', () => {
     const r = routeIntent('How do I change my password?');
     expect(r.intent).toBe('platform_how_to');
-    expect(r.featureCategories).toContain('settings');
+    expect(r.featureCategories).toContain('account');
   });
 
   it('Q12 undocumented feature → not out_of_scope, no fabrication', async () => {
@@ -327,9 +303,9 @@ describe('Wrong-topic regression', () => {
     expect(r.featureCategories).toContain('appointments');
   });
 
-  it('Q17 "set staff working hours" → featureCategories includes staff', () => {
+  it('Q17 "set staff working hours" → featureCategories is Availability (where staff hours are set)', () => {
     const r = routeIntent('set staff working hours');
-    expect(r.featureCategories).toContain('staff');
+    expect(r.featureCategories).toContain('availability');
   });
 
   it('Q18 "connect Google Calendar" → featureCategories includes integrations, not calendar alone', () => {
@@ -342,10 +318,12 @@ describe('Wrong-topic regression', () => {
     expect(r.featureCategories).toContain('notifications');
   });
 
-  it('Q20 "what reports are available" → NOT availability_query', () => {
+  it('Q20 "what reports are available" → NOT availability_query, answered from Known Limitations', async () => {
     const r = routeIntent('what reports are available');
     expect(r.intent).not.toBe('availability_query');
-    expect(r.featureCategories).toContain('reports');
+    expect(r.featureCategories).toContain('limitations');
+    const result = await localAnswer('what reports are available');
+    expect(result.answer).toMatch(/not available/);
   });
 
   it('Q21 "show my bookings tomorrow" → live_data_query', () => {
@@ -354,9 +332,10 @@ describe('Wrong-topic regression', () => {
     expect(r.entities.date).toBeDefined();
   });
 
-  it('Q22 "invite team members to a workspace" → featureCategories includes workspaces', () => {
+  it('Q22 "invite team members to a workspace" → team and known limitations (workspaces are gone)', () => {
     const r = routeIntent('invite team members to a workspace');
-    expect(r.featureCategories).toContain('workspaces');
+    expect(r.featureCategories).toContain('staff');
+    expect(r.featureCategories).toContain('limitations');
   });
 });
 
@@ -458,10 +437,10 @@ describe('Account management', () => {
 
 describe('Navigation queries', () => {
 
-  it('Q34 "go to calendar" → navigation, /calendar', () => {
+  it('Q34 "go to calendar" → navigation, the calendar view of Appointments', () => {
     const r = routeIntent('go to calendar');
     expect(r.intent).toBe('navigation');
-    expect(r.entities.routePath).toBe('/calendar');
+    expect(r.entities.routePath).toBe('/appointments?view=calendar');
   });
 
   it('Q35 "open settings" → navigation, /settings', () => {
@@ -470,10 +449,10 @@ describe('Navigation queries', () => {
     expect(r.entities.routePath).toBe('/settings');
   });
 
-  it('Q36 "take me to staff" → navigation, /staff', () => {
+  it('Q36 "take me to staff" → navigation, Settings → Team', () => {
     const r = routeIntent('take me to staff');
     expect(r.intent).toBe('navigation');
-    expect(r.entities.routePath).toBe('/staff');
+    expect(r.entities.routePath).toBe('/settings/team');
   });
 });
 
@@ -628,13 +607,13 @@ describe('Heading rank, email reminders, workspace invite', () => {
     expect(fullText.toLowerCase()).not.toMatch(/business hours|what is faq|frequently asked/i);
   });
 
-  it('Q54 "How do I invite team members to a workspace" → workspace invite/assign steps', async () => {
+  it('Q54 "How do I invite team members to a workspace" → team invitation (workspaces no longer exist)', async () => {
     const result = await localAnswer('How do I invite team members to a workspace', 5, MOCK_USER);
     expect(result.type).not.toBe('out_of_scope');
     const fullText = result.answer + ' ' + (result.steps ?? []).join(' ');
-    expect(fullText.toLowerCase()).toMatch(/workspace|staff|invite|assign/i);
-    // Should surface invite/assign info, not just workspace creation steps
-    const stepsText = (result.steps ?? []).join(' ').toLowerCase();
-    expect(stepsText).toMatch(/staff|assign|workspace|profile/i);
+    expect(fullText).toMatch(/Settings → Team/);
+    expect(fullText).toMatch(/Owner|Staff/);
+    // Never steps for creating a workspace, which no longer exists.
+    expect(fullText).not.toMatch(/Create Workspace|\/workspaces/);
   });
 });

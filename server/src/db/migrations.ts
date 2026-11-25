@@ -697,6 +697,132 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: '018_single_scheduled_status',
+    description: 'V4 statuses: "confirmed" appointments become "scheduled" (no separate confirmation stage)',
+    // Both statuses are active, so the overlap and resource triggers do not re-check these rows.
+    apply(db) {
+      db.prepare("UPDATE appointments SET status = 'scheduled' WHERE status = 'confirmed'").run();
+    },
+  },
+  {
+    id: '019_customer_phone_or_email',
+    description: 'Customers need a phone or an email: no email is stored as an empty string, unique only when present',
+    // The column stays NOT NULL (rebuilding the table would cascade-delete child rows while foreign keys are on);
+    // an absent email is '' and the API reports it as null. Only real addresses must be unique per organization.
+    apply(db) {
+      db.exec(`
+        DROP INDEX IF EXISTS idx_customers_org_email;
+        CREATE UNIQUE INDEX idx_customers_org_email ON customers(organization_id, email) WHERE email <> '';
+        CREATE INDEX IF NOT EXISTS idx_customers_org_phone ON customers(organization_id, phone);
+      `);
+    },
+  },
+  {
+    id: '020_date_hours',
+    description: 'Different opening hours on a specific date, for the business (staff_id NULL) or one provider',
+    apply(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS date_hours (
+          id TEXT PRIMARY KEY,
+          organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+          staff_id TEXT REFERENCES staff(id) ON DELETE CASCADE,
+          date TEXT NOT NULL,
+          start_time TEXT NOT NULL,
+          end_time TEXT NOT NULL,
+          reason TEXT NOT NULL DEFAULT '',
+          created_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_date_hours_lookup ON date_hours(organization_id, date, staff_id);
+      `);
+    },
+  },
+  {
+    id: '021_appointment_location',
+    description: 'One business appointment location or online instructions (optional)',
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(organizations)').all() as Array<{ name: string }>;
+      if (!columns.some(c => c.name === 'appointment_location')) {
+        db.exec("ALTER TABLE organizations ADD COLUMN appointment_location TEXT NOT NULL DEFAULT ''");
+      }
+    },
+  },
+  {
+    id: '022_default_booking_page',
+    description: 'Marks the one default business booking page (it offers every active service)',
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(booking_pages)').all() as Array<{ name: string }>;
+      if (!columns.some(c => c.name === 'is_default')) {
+        db.exec('ALTER TABLE booking_pages ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0');
+      }
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_booking_pages_default ON booking_pages(organization_id) WHERE is_default = 1');
+    },
+  },
+  {
+    id: '023_owner_invitations',
+    description: 'Staff invitations may also grant Owner (admin) sign-in access',
+    // Only the CHECK constraint changes. No table references staff_invitations, so it is rebuilt in place.
+    apply(db) {
+      db.exec(`
+        CREATE TABLE staff_invitations_v4 (
+          id TEXT PRIMARY KEY,
+          organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+          staff_id TEXT NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+          email TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('staff', 'manager', 'admin')),
+          token_hash TEXT NOT NULL UNIQUE,
+          invited_by TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          expires_at TEXT NOT NULL,
+          accepted_at TEXT,
+          accepted_user_id TEXT,
+          revoked_at TEXT,
+          delivery_status TEXT,
+          delivery_error TEXT
+        );
+        INSERT INTO staff_invitations_v4 (id, organization_id, staff_id, email, role, token_hash, invited_by, created_at,
+          expires_at, accepted_at, accepted_user_id, revoked_at, delivery_status, delivery_error)
+        SELECT id, organization_id, staff_id, email, role, token_hash, invited_by, created_at,
+          expires_at, accepted_at, accepted_user_id, revoked_at, delivery_status, delivery_error FROM staff_invitations;
+        DROP TABLE staff_invitations;
+        ALTER TABLE staff_invitations_v4 RENAME TO staff_invitations;
+        CREATE INDEX IF NOT EXISTS idx_staff_invitations_staff ON staff_invitations(staff_id, created_at);
+      `);
+    },
+  },
+  {
+    id: '024_user_photos',
+    description: 'Signed-in people may have a profile photo (media kind user_photo)',
+    // Only the CHECK constraint changes. No table references media_files, so it is rebuilt in place with every row.
+    apply(db) {
+      db.exec(`
+        CREATE TABLE media_files_v4 (
+          id TEXT PRIMARY KEY,
+          organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL CHECK (kind IN ('logo', 'staff_photo', 'user_photo')),
+          owner_id TEXT NOT NULL,
+          storage TEXT NOT NULL,
+          storage_key TEXT NOT NULL UNIQUE,
+          content_type TEXT NOT NULL CHECK (content_type IN ('image/png', 'image/jpeg', 'image/webp')),
+          byte_size INTEGER NOT NULL CHECK (byte_size > 0 AND byte_size <= 2097152),
+          width INTEGER NOT NULL CHECK (width BETWEEN 1 AND 4096),
+          height INTEGER NOT NULL CHECK (height BETWEEN 1 AND 4096),
+          sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+          uploaded_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          CHECK (kind != 'logo' OR owner_id = organization_id)
+        );
+        INSERT INTO media_files_v4 (id, organization_id, kind, owner_id, storage, storage_key, content_type, byte_size, width, height,
+          sha256, uploaded_by, created_at)
+        SELECT id, organization_id, kind, owner_id, storage, storage_key, content_type, byte_size, width, height,
+          sha256, uploaded_by, created_at FROM media_files;
+        DROP TABLE media_files;
+        ALTER TABLE media_files_v4 RENAME TO media_files;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_media_files_owner ON media_files(organization_id, kind, owner_id);
+      `);
+    },
+  },
 ];
 
 export const MIGRATION_IDS = MIGRATIONS.map(m => m.id);

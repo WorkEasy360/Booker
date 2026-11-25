@@ -134,10 +134,11 @@ describe('appointment status values and search', () => {
   });
 
   it('accepts the backend status values (outcomes only once the appointment has started)', async () => {
+    // V4: four statuses; the legacy "confirmed" is accepted and stored as "scheduled".
     for (const status of ['confirmed', 'scheduled']) {
       const res = await request(app).put(`/api/appointments/${apptId}`).set(bearer(A)).send({ status });
       expect(res.status).toBe(200);
-      expect(res.body.data.status).toBe(status);
+      expect(res.body.data.status).toBe('scheduled');
     }
     for (const status of ['no_show', 'completed']) {
       const res = await request(app).put(`/api/appointments/${apptId}`).set(bearer(A)).send({ status });

@@ -11,7 +11,8 @@ import { staffSlotProblem, type SlotProblem } from '../services/bookability';
 import { toMinutes } from '../services/schedule';
 import { DateString, TimeString } from '../validation';
 import { sendAppointmentEmail, listDeliveries } from '../services/email/notify';
-import { APPOINTMENT_STATUSES, INITIAL_STATUSES, statusChangeProblem, type StatusProblem } from '../services/appointment-status';
+import { INITIAL_STATUSES, StatusInput, normalizeStatus, statusChangeProblem, type StatusProblem } from '../services/appointment-status';
+import { appointmentLocation } from '../services/default-booking-page';
 import { appointmentState, listHistory, recordChanges, recordCreated, recordDeleted, type HistoryActor } from '../services/appointment-history';
 import { chooseResources, heldResources, holdResources, releaseResources } from '../services/resources';
 
@@ -65,7 +66,7 @@ const AppointmentSchema = z.object({
   staffId: z.string().min(1).max(64),
   customerId: z.string().min(1).max(64),
   resourceIds: z.array(z.string().max(64)).max(50).optional(),
-  status: z.enum(APPOINTMENT_STATUSES).default('scheduled'),
+  status: StatusInput.default('scheduled'),
   date: DateString,
   startTime: TimeString,
   // Accepted for backwards compatibility but ignored: appointments always use the business time zone.
@@ -85,7 +86,7 @@ function rowToAppointment(row: Record<string, unknown>) {
     staffId: row.staff_id,
     customerId: row.customer_id,
     resourceIds: JSON.parse(row.resource_ids as string ?? '[]'),
-    status: row.status,
+    status: normalizeStatus(row.status),
     date: row.date,
     startTime: row.start_time,
     endTime: row.end_time,
@@ -107,6 +108,7 @@ function rowToAppointmentWithNames(row: Record<string, unknown>) {
     ...rowToAppointment(row),
     customerName: (row.customer_name as string) ?? '',
     customerEmail: (row.customer_email as string) ?? '',
+    customerPhone: (row.customer_phone as string) ?? '',
     serviceName: (row.service_name as string) ?? '',
     serviceColor: (row.service_color as string) ?? '#00BF62',
     staffName: (row.staff_name as string) ?? '',
@@ -131,7 +133,7 @@ router.get('/', canRead, (req: AuthRequest, res, next) => {
     if (!scope.all && !scope.staffId) { res.json({ data: [] }); return; }
     let sql = `
       SELECT a.*,
-        c.name  AS customer_name,  c.email AS customer_email,
+        c.name  AS customer_name,  c.email AS customer_email, c.phone AS customer_phone,
         s.name  AS service_name,   s.color AS service_color,
         st.name AS staff_name,     st.color AS staff_color
       FROM appointments a
@@ -144,12 +146,12 @@ router.get('/', canRead, (req: AuthRequest, res, next) => {
     if (!scope.all) { sql += ' AND a.staff_id = ?';    params.push(scope.staffId); }
     if (date)       { sql += ' AND a.date = ?';        params.push(date); }
     if (staffId)    { sql += ' AND a.staff_id = ?';    params.push(staffId); }
-    if (status)     { sql += ' AND a.status = ?';      params.push(status); }
+    if (status)     { sql += ' AND a.status = ?';      params.push(normalizeStatus(status)); }
     if (customerId) { sql += ' AND a.customer_id = ?'; params.push(customerId); }
     if (q?.trim()) {
       const like = `%${q.trim().replace(/[\\%_]/g, m => '\\' + m)}%`;
-      sql += " AND (c.name LIKE ? ESCAPE '\\' OR c.email LIKE ? ESCAPE '\\' OR a.booking_ref LIKE ? ESCAPE '\\')";
-      params.push(like, like, like);
+      sql += " AND (c.name LIKE ? ESCAPE '\\' OR c.email LIKE ? ESCAPE '\\' OR c.phone LIKE ? ESCAPE '\\' OR a.booking_ref LIKE ? ESCAPE '\\')";
+      params.push(like, like, like, like);
     }
 
     sql += ' ORDER BY a.date DESC, a.start_time ASC';
@@ -222,8 +224,8 @@ router.get('/:id', canRead, (req: AuthRequest, res, next) => {
 
 router.post('/', canWrite, async (req: AuthRequest, res, next) => {
   if (req.body && typeof req.body === 'object' && 'status' in req.body
-    && !(INITIAL_STATUSES as unknown[]).includes((req.body as { status?: unknown }).status)) {
-    res.status(400).json({ error: 'A new appointment can only be scheduled or confirmed.', code: 'INVALID_STATUS_CHANGE' });
+    && !(INITIAL_STATUSES as unknown[]).includes(normalizeStatus((req.body as { status?: unknown }).status))) {
+    res.status(400).json({ error: 'A new appointment is always Scheduled.', code: 'INVALID_STATUS_CHANGE' });
     return;
   }
   try {
@@ -275,7 +277,7 @@ router.post('/', canWrite, async (req: AuthRequest, res, next) => {
         '[]', data.status,
         data.date, data.startTime, endTime, svc.duration,
         getOrgTimezone(orgId),
-        svc.price, svc.currency, svc.location,
+        svc.price, svc.currency, appointmentLocation(orgId, svc.location),
         data.notes ?? '', data.internalNotes ?? '',
         JSON.stringify(data.customerAnswers ?? [])
       );

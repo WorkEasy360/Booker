@@ -34,6 +34,7 @@ import messagingWebhookRoutes from './routes/messaging-webhooks';
 import notificationRoutes from './routes/notifications';
 import integrationRoutes from './routes/integrations';
 import { processWebhookDeliveries, recoverInterruptedWebhooks } from './services/integrations/webhooks';
+import { startDemoRolling } from './services/demo-roll';
 
 // Fails fast on unsafe security settings (production) and invalid email settings, before any request is served.
 const security = initSecurityConfig();
@@ -121,6 +122,8 @@ if (process.env.NODE_ENV !== 'test') {
   let webhookTimer: NodeJS.Timeout | undefined;
   const server = app.listen(PORT, () => {
     console.log(`WorkEasy360 API running on http://localhost:${PORT}`);
+    // Development: the demo business (npm run demo) keeps today's records as the calendar moves on.
+    startDemoRolling();
     console.log(`Allowed app origins: ${security.allowedOrigins.join(', ')}`);
     console.log(webAppDir ? `Web app: served from ${webAppDir}` : 'Web app: not served by this process (WEB_DIST_DIR is not set)');
     for (const w of security.warnings) console.warn(`[security] ${w}`);

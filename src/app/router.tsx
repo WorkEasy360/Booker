@@ -51,6 +51,21 @@ function PermissionGate() {
   );
 }
 
+/** Addresses of screens that V4 removed or merged into the four menus. */
+const LEGACY_REDIRECTS: Array<[string, string]> = [
+  ['dashboard', '/appointments'],
+  ['my-space', '/appointments'],
+  ['calendar', '/appointments?view=calendar'],
+  ['reports', '/appointments'],
+  ['workspaces/*', '/appointments'],
+  ['resources/*', '/appointments'],
+  ['services/*', '/settings/services'],
+  ['staff/*', '/settings/team'],
+  ['booking-pages/*', '/settings/public-booking'],
+  ['notifications', '/settings/notifications'],
+  ['integrations', '/settings/integrations'],
+];
+
 function L(factory: () => Promise<{ default: React.ComponentType }>) {
   const Component = lazy(factory);
   return (
@@ -84,80 +99,39 @@ export const router = createBrowserRouter([
          errorElement: <RouteErrorPage variant="shell" />,
          children: [
           { index: true, element: <HomeRedirect /> },
-          { path: 'dashboard',     element: L(() => import('@/features/dashboard/DashboardPage')) },
-          { path: 'my-space',      element: L(() => import('@/features/my-space/MySpacePage')) },
+          // Four main menus: Appointments (home), Availability, Customers, Settings.
           {
             path: 'appointments',
             children: [
               { index: true, element: L(() => import('@/features/appointments/AppointmentsPage')) },
               { path: 'new',              element: L(() => import('@/features/appointments/NewAppointmentPage')) },
               { path: ':id',              element: L(() => import('@/features/appointments/AppointmentDetailPage')) },
+              { path: ':id/edit',         element: L(() => import('@/features/appointments/NewAppointmentPage')) },
               { path: ':id/reschedule',   element: L(() => import('@/features/appointments/ReschedulePage')) },
             ],
           },
-          { path: 'calendar', element: L(() => import('@/features/calendar/CalendarPage')) },
-          {
-            path: 'workspaces',
-            children: [
-              { index: true, element: L(() => import('@/features/workspaces/WorkspacesPage')) },
-              { path: 'new',      element: L(() => import('@/features/workspaces/WorkspaceFormPage')) },
-              { path: ':id',      element: L(() => import('@/features/workspaces/WorkspaceDetailPage')) },
-              { path: ':id/edit', element: L(() => import('@/features/workspaces/WorkspaceFormPage')) },
-            ],
-          },
-          {
-            path: 'services',
-            children: [
-              { index: true, element: L(() => import('@/features/services/ServicesPage')) },
-              { path: 'new',      element: L(() => import('@/features/services/ServiceFormPage')) },
-              { path: ':id',      element: L(() => import('@/features/services/ServiceDetailPage')) },
-              { path: ':id/edit', element: L(() => import('@/features/services/ServiceFormPage')) },
-            ],
-          },
-          {
-            path: 'staff',
-            children: [
-              { index: true, element: L(() => import('@/features/staff/StaffPage')) },
-              { path: 'new',      element: L(() => import('@/features/staff/StaffFormPage')) },
-              { path: ':id',      element: L(() => import('@/features/staff/StaffProfilePage')) },
-              { path: ':id/edit', element: L(() => import('@/features/staff/StaffFormPage')) },
-            ],
-          },
-          {
-            path: 'resources',
-            children: [
-              { index: true, element: L(() => import('@/features/resources/ResourcesPage')) },
-              { path: 'new',      element: L(() => import('@/features/resources/ResourceFormPage')) },
-              { path: ':id',      element: L(() => import('@/features/resources/ResourceDetailPage')) },
-              { path: ':id/edit', element: L(() => import('@/features/resources/ResourceFormPage')) },
-            ],
-          },
+          { path: 'availability', element: L(() => import('@/features/availability/AvailabilityPage')) },
           {
             path: 'customers',
             children: [
               { index: true, element: L(() => import('@/features/customers/CustomersPage')) },
-              { path: 'new',  element: L(() => import('@/features/customers/CustomerFormPage')) },
-              { path: ':id',  element: L(() => import('@/features/customers/CustomerDetailPage')) },
+              { path: 'new',      element: L(() => import('@/features/customers/CustomerFormPage')) },
+              { path: ':id',      element: L(() => import('@/features/customers/CustomerDetailPage')) },
+              { path: ':id/edit', element: L(() => import('@/features/customers/CustomerFormPage')) },
             ],
           },
-          {
-            path: 'booking-pages',
-            children: [
-              { index: true, element: L(() => import('@/features/booking-pages/BookingPagesPage')) },
-              { path: 'new',  element: L(() => import('@/features/booking-pages/BookingPageEditor')) },
-              { path: ':id',  element: L(() => import('@/features/booking-pages/BookingPageEditor')) },
-            ],
-          },
-          { path: 'notifications', element: L(() => import('@/features/notifications/NotificationsPage')) },
-          { path: 'integrations',  element: L(() => import('@/features/integrations/IntegrationsPage')) },
-          { path: 'reports',       element: L(() => import('@/features/reports/ReportsPage')) },
           {
             path: 'settings',
             children: [
               { index: true, element: L(() => import('@/features/settings/SettingsPage')) },
               { path: ':tab', element: L(() => import('@/features/settings/SettingsPage')) },
+              { path: ':tab/*', element: L(() => import('@/features/settings/SettingsPage')) },
             ],
           },
+          // Account menu: My Account (shared profile and security).
+          { path: 'account', element: L(() => import('@/features/account/MyAccountPage')) },
+          // Earlier addresses of removed or merged screens keep working.
+          ...LEGACY_REDIRECTS.map(([from, to]) => ({ path: from, element: <Navigate to={to} replace /> })),
          ],
         }],
       },

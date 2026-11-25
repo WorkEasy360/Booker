@@ -11,6 +11,7 @@ import { issueManageToken, emailLinkExpiry } from '../booking-access';
 import { DEFAULT_TIMEZONE } from '../business-locale';
 import { getPreferences, getTemplate } from './preferences';
 import { appointmentIcs } from '../notifications/ics';
+import { ruleEnabled } from '../notifications/settings';
 
 // Booking emails go through an outbox (email_outbox) so that:
 //  - every intended email is recorded before any attempt, under a unique dedupe key, so the same booking event can
@@ -22,7 +23,14 @@ import { appointmentIcs } from '../notifications/ics';
 //  - "sent" is recorded only when the transport accepted the message.
 
 export type DeliveryStatus = 'sent' | 'failed' | 'not_configured' | 'retrying';
-export interface DeliveryResult { status: DeliveryStatus; error?: string; nextAttemptAt?: string }
+/** noEmail: the customer gave no email address (V4: phone-only customers), so nothing was queued or sent. */
+/**
+ * noEmail: the customer gave no email address (V4: phone-only customers). switchedOff: the business turned customer
+ * booking emails off. In both cases nothing was sent and the booking is unaffected.
+ */
+export interface DeliveryResult { status: DeliveryStatus; error?: string; nextAttemptAt?: string; noEmail?: true; switchedOff?: true }
+
+const EVENT_OF: Record<EmailKind, 'confirmed' | 'rescheduled' | 'cancelled'> = { confirmation: 'confirmed', reschedule: 'rescheduled', cancellation: 'cancelled' };
 
 export interface EmailAttachment { filename: string; content: string; contentType: string }
 export interface OutboxMessage { to: string; from: string; subject: string; text: string; html: string; messageId?: string; attachments?: EmailAttachment[] }
@@ -261,6 +269,14 @@ export async function sendAppointmentEmail(
   // Booking events also alert the staff member when the business turned that on (queued once per event).
   if (!opts.manual && eventHook) {
     try { eventHook(kind, row, previous); } catch (e) { console.error('[email] staff alert could not be queued:', e instanceof Error ? e.message : e); }
+  }
+  // A customer without an email address gets no booking emails; the booking itself is unaffected.
+  if (!row.customer_email) return { status: 'not_configured', error: 'The customer has no email address, so email updates cannot be sent.', noEmail: true };
+  // Switched off in Settings → Notifications: recorded as not sent (never as sent). An explicit resend still goes out.
+  if (!opts.manual && !ruleEnabled(row.organization_id, EVENT_OF[kind], 'customer', 'email')) {
+    const error = 'Customer booking emails are turned off in Settings → Notifications.';
+    record(row, kind, 'not_configured', 'switched_off', undefined, error);
+    return { status: 'not_configured', error, switchedOff: true };
   }
   const dedupeKey = opts.manual
     ? `resend:${kind}:${appointmentId}:${nanoid(10)}`
